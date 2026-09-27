@@ -72,7 +72,7 @@ class ContentScraper:
             "js_runtimes": {"node": {}},
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["visionos", "android", "ios", "web"]
+                    "player_client": ["visionos"]
                 }
             },
             "http_headers": {
@@ -234,7 +234,7 @@ class ContentScraper:
             "js_runtimes": {"node": {}},
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["visionos", "android", "ios", "web"]
+                    "player_client": ["visionos"]
                 }
             },
             "http_headers": {
@@ -260,23 +260,24 @@ class ContentScraper:
                     downloaded_video_path = f"{base}.mp4"
         except Exception as e:
             err_str = str(e)
-            # If cookies failed, expired, or triggered bot check, retry cleanly with visionos without stale cookies
-            if "cookiefile" in ydl_opts and any(w in err_str.lower() for w in ["bot", "cookie", "sign in"]):
-                logger.warning(f"Cookie authentication failed ({e}). Retrying download without cookies using visionos client...")
-                ydl_opts_fallback = dict(ydl_opts)
-                ydl_opts_fallback.pop("cookiefile", None)
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
-                        info = ydl_fb.extract_info(url, download=True)
-                        downloaded_video_path = ydl_fb.prepare_filename(info)
-                        base, _ = os.path.splitext(downloaded_video_path)
-                        if os.path.exists(f"{base}.mp4"):
-                            downloaded_video_path = f"{base}.mp4"
-                except Exception as e2:
-                    logger.warning(f"Fallback download also reported: {e2}. Resolving stream files on Windows...")
-                    e = e2
-            else:
-                logger.warning(f"Download process reported: {e}. Resolving stream files on Windows...")
+            logger.warning(f"Download with visionos reported: {e}. Retrying with web_embedded client...")
+            ydl_opts_fallback = dict(ydl_opts)
+            ydl_opts_fallback.pop("cookiefile", None)
+            ydl_opts_fallback["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["web_embedded"]
+                }
+            }
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
+                    info = ydl_fb.extract_info(url, download=True)
+                    downloaded_video_path = ydl_fb.prepare_filename(info)
+                    base, _ = os.path.splitext(downloaded_video_path)
+                    if os.path.exists(f"{base}.mp4"):
+                        downloaded_video_path = f"{base}.mp4"
+            except Exception as e2:
+                logger.warning(f"Fallback download also reported: {e2}. Resolving stream files on Windows...")
+                e = e2
             import time, shutil
             from utils.ffmpeg_helper import run_ffmpeg_cmd
 
