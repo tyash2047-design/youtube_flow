@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Sensitive API Keys & OAuth Secrets (NEVER COMMIT)
+.env
+client_secrets.json
+data/youtube_token.json
+
+# Local Pipeline Database & Logs
+data/pipeline.db
+data/pipeline.db-journal
+data/pipeline.log
+*.log
+
+# Media & Temporary Video Files
+*.mp4
+*.wav
+*.m4a
+*.m3u8
+*.part
+*.ytdl
+*.ass
+data/downloads/*
+!data/downloads/.gitkeep
+data/rendered/*
+!data/rendered/.gitkeep
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

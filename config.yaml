@@ -1,0 +1,140 @@
+# ====================================================================
+# YouTube Shorts 24/7 Autonomous Pipeline Configuration
+# ====================================================================
+
+# 1. CONTENT SOURCES & SCRAPING
+sources:
+  # Channels to monitor (Gaming & viral entertainment influencers)
+  channels:
+    - "https://www.youtube.com/@MrBeastGaming"
+    - "https://www.youtube.com/@MrBeast"
+    - "https://www.youtube.com/@whistlindiesel"
+    - "https://www.youtube.com/@sshhuubb"
+    - "https://www.youtube.com/@SlayyPop"
+    - "https://www.youtube.com/@AyushBhandari"
+  
+  # Search keywords for viral discovery
+  keywords:
+    - "MrBeast Gaming crazy challenges moments"
+    - "WhistlinDiesel insane stunts moments"
+    - "Shub gaming funny highlights"
+    - "SlayyPop funniest reaction gaming"
+    - "Ayush Bhandari hilarious moments"
+    - "insane viral gaming moments"
+
+  # Filtering criteria
+  min_duration_seconds: 180      # Skip videos shorter than 3 minutes
+  max_duration_seconds: 7200     # Skip videos longer than 2 hours
+  min_views: 15000               # Filter out low engagement videos
+  max_videos_per_scrape: 2       # How many new source videos to download per check
+  download_resolution: "1080"    # Max resolution to download for source (1080, 720)
+
+# 2. AI HIGHLIGHT DETECTION & TRIMMING
+clipping:
+  min_clip_seconds: 15           # Strict YouTube Shorts lower bound
+  max_clip_seconds: 50           # Strict YouTube Shorts upper bound (maximizes loop rate)
+  max_clips_per_source: 3        # Number of highlight clips to generate per source video
+  min_retention_score: 7.5       # Minimum AI score (1-10) to qualify for rendering
+
+  # LLM Provider for transcript analysis & metadata generation
+  # Options: 'gemini' (recommended: fast, multimodal) or 'openai'
+  llm_provider: "gemini"
+  gemini_model: "gemini-3.6-flash"
+  openai_model: "gpt-4o-mini"
+
+  # Local Whisper Model for transcription
+  # Options: 'base', 'small', 'medium' ('small' is ideal balance for speed/accuracy)
+  whisper_model_size: "small"
+  whisper_device: "auto"         # 'cuda' if NVIDIA GPU available, else 'cpu'
+
+# 3. VIDEO FRAMING & 9:16 RENDERING
+video:
+  output_width: 1080
+  output_height: 1920
+  fps: 30
+  
+  # Framing mode for 16:9 landscape to 9:16 vertical:
+  # - 'cinematic_blur': Original 16:9 centered with heavily blurred 9:16 background (best for podcasts/interviews)
+  # - 'center_crop': Scale and crop the middle 9:16 portion
+  framing_mode: "cinematic_blur"
+  blur_intensity: 25
+  
+  # Normalize audio loudness to standard YouTube -14 LUFS
+  normalize_audio: true
+
+# 4. TRENDY DYNAMIC SUBTITLES (Alex Hormozi Style)
+subtitles:
+  enabled: true
+  # Font name (Ensure installed on Windows, e.g. Arial Black, Montserrat, Impact)
+  font_name: "Arial Black"
+  font_size: 46
+  
+  # Subtitle placement safe zone (percentage from top, 0.0 to 1.0)
+  # 0.65 to 0.70 keeps text away from YouTube Shorts bottom overlays and top UI
+  vertical_position: 0.68
+  
+  # Max words displayed simultaneously in a subtitle burst
+  words_per_burst: 3
+  
+  # Color palette in ASS format (&HAABBGGRR&)
+  # Active spoken word highlight color (Bright Yellow: &H0000FFFF& or Lime Green: &H0033FF33&)
+  highlight_color: "&H0000FFFF&"
+  # Inactive words color (Crisp White)
+  primary_color: "&H00FFFFFF&"
+  # Outline color (Pure Black)
+  outline_color: "&H00000000&"
+  outline_width: 4.5
+  shadow_depth: 2.0
+  
+  # Active word animation: scale pop (115% enlargement on spoken word)
+  enable_scale_pop: true
+
+# 5. YOUTUBE UPLOADER & QUOTA MANAGEMENT
+uploader:
+  # Default privacy status: 'public' (visible on channel), 'unlisted', or 'private'
+  privacy_status: "public"
+  
+  # Default Category ID:
+  # 24 = Entertainment, 22 = People & Blogs, 27 = Education, 20 = Gaming
+  category_id: "24"
+  
+  # Maximum daily uploads (Set to 0 for UNLIMITED uploads, no cap)
+  max_daily_uploads: 0
+  
+  # Auto-tagging defaults appended to LLM generated tags
+  default_tags:
+    - "Shorts"
+    - "viral"
+    - "trending"
+    - "podcast"
+    - "insights"
+  
+  # Include source credit in description (set to false to keep description clean without video links)
+  credit_original_creator: false
+
+# 6. 24/7 SCHEDULER & AUTONOMOUS ENGINE
+scheduler:
+  # How often to check channels for new content (in hours)
+  scrape_interval_hours: 4
+  
+  # Target upload schedule times throughout the day (24-hour format)
+  upload_times:
+    - "09:30"
+    - "13:00"
+    - "17:30"
+    - "21:00"
+  
+  # Cleanup: Delete raw downloaded source videos after clipping to save disk space
+  delete_raw_source_after_processing: true
+  
+  # Retain rendered short MP4s locally after upload (days, 0 to keep forever)
+  rendered_retention_days: 7
+
+# 7. STORAGE PATHS
+paths:
+  data_dir: "./data"
+  temp_download_dir: "./data/downloads"
+  rendered_clips_dir: "./data/rendered"
+  database_file: "./data/pipeline.db"
+  client_secrets_file: "./client_secrets.json"
+  token_file: "./data/youtube_token.json"
