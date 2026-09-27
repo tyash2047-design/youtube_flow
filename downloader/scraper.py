@@ -17,10 +17,32 @@ class ContentScraper:
         self.download_dir = config.get("paths", {}).get("temp_download_dir", "./data/downloads")
         os.makedirs(self.download_dir, exist_ok=True)
 
+    def _sanitize_cookie_content(self, raw_content: str) -> str:
+        """
+        Strips volatile, browser-fingerprinted rotating tokens (__Secure-1PSIDTS, __Secure-3PSIDTS,
+        SIDCC, __Secure-1PSIDCC, __Secure-3PSIDCC, YENID, YNID, ROLLOUT_TOKEN) from Netscape cookies.
+        Leaving these tokens causes YouTube to immediately fail with 'cookies no longer valid / rotated'
+        or 'bot verification' when used on cloud/datacenter IPs.
+        Stripping them leaves clean, long-lived credentials (LOGIN_INFO, SID, HSID, SSID, SAPISID).
+        """
+        toxic_names = ["PSIDTS", "SIDCC", "YENID", "YNID", "ROLLOUT_TOKEN"]
+        sanitized_lines = []
+        for line in raw_content.splitlines():
+            if not line.strip() or line.startswith("#"):
+                sanitized_lines.append(line)
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 6:
+                cookie_name = parts[5].strip()
+                if any(t in cookie_name for t in toxic_names):
+                    continue
+            sanitized_lines.append(line)
+        return "\n".join(sanitized_lines) + "\n"
+
     def _get_cookie_file(self) -> Optional[str]:
         """
-        Locates or restores YouTube cookies from environment variables or local files.
-        Essential for cloud deployments (Render, AWS, GCP) to bypass bot verification.
+        Locates or restores YouTube cookies from environment variables or local files,
+        automatically sanitizing them to remove volatile browser tokens that trigger bot flags.
         """
         cookie_path = os.path.join(self.download_dir, "cookies.txt")
 
@@ -30,9 +52,10 @@ class ContentScraper:
             try:
                 import base64
                 decoded = base64.b64decode(cookie_b64.strip()).decode("utf-8", errors="ignore")
+                sanitized = self._sanitize_cookie_content(decoded)
                 with open(cookie_path, "w", encoding="utf-8") as f:
-                    f.write(decoded)
-                logger.info(f"Restored YouTube cookies from YOUTUBE_COOKIES_BASE64 -> {cookie_path}")
+                    f.write(sanitized)
+                logger.info(f"Restored & sanitized YouTube cookies from YOUTUBE_COOKIES_BASE64 -> {cookie_path}")
                 return cookie_path
             except Exception as e:
                 logger.warning(f"Could not decode YOUTUBE_COOKIES_BASE64: {e}")
@@ -41,9 +64,10 @@ class ContentScraper:
         cookie_txt = os.getenv("YOUTUBE_COOKIES_TXT")
         if cookie_txt:
             try:
+                sanitized = self._sanitize_cookie_content(cookie_txt.strip())
                 with open(cookie_path, "w", encoding="utf-8") as f:
-                    f.write(cookie_txt.strip())
-                logger.info(f"Restored YouTube cookies from YOUTUBE_COOKIES_TXT -> {cookie_path}")
+                    f.write(sanitized)
+                logger.info(f"Restored & sanitized YouTube cookies from YOUTUBE_COOKIES_TXT -> {cookie_path}")
                 return cookie_path
             except Exception as e:
                 logger.warning(f"Could not write YOUTUBE_COOKIES_TXT: {e}")
@@ -56,7 +80,15 @@ class ContentScraper:
         ]
         for c in candidates:
             if os.path.exists(c) and os.path.getsize(c) > 10:
-                return c
+                try:
+                    with open(c, "r", encoding="utf-8", errors="ignore") as f:
+                        raw = f.read()
+                    sanitized = self._sanitize_cookie_content(raw)
+                    with open(cookie_path, "w", encoding="utf-8") as f:
+                        f.write(sanitized)
+                    return cookie_path
+                except Exception:
+                    return c
 
         return None
 

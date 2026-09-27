@@ -283,7 +283,8 @@ class PipelineRunner:
         except Exception as e:
             logger.error(f"Error during initial startup pass: {e}")
 
-        logger.info(f"Daemon active: Scraping every {scrape_hours}h | Upload schedule: {', '.join(upload_times)}")
+        upload_mode_str = "Instant (every 2 min)" if self.scheduler_cfg.get("post_immediately", True) else f"Scheduled ({', '.join(self.scheduler_cfg.get('upload_times', []))})"
+        logger.info(f"Daemon active: Scraping every {scrape_hours}h | Upload mode: {upload_mode_str}")
         try:
             scheduler.start()
         except (KeyboardInterrupt, SystemExit):
