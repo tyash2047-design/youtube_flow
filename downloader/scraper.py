@@ -39,10 +39,16 @@ class ContentScraper:
             sanitized_lines.append(line)
         return "\n".join(sanitized_lines) + "\n"
 
+    def _is_authenticated_cookie(self, content: str) -> bool:
+        """Checks if cookie file contains actual authenticated login credentials."""
+        has_login = "LOGIN_INFO" in content
+        has_sid = any(k in content for k in ["\tSID\t", "\t__Secure-1PSID\t", "\t__Secure-3PSID\t", "\tSAPISID\t"])
+        return has_login or has_sid
+
     def _get_cookie_file(self) -> Optional[str]:
         """
         Locates or restores YouTube cookies from environment variables or local files,
-        automatically sanitizing them to remove volatile browser tokens that trigger bot flags.
+        verifying that it actually contains authenticated session tokens.
         """
         cookie_path = os.path.join(self.download_dir, "cookies.txt")
 
@@ -52,10 +58,12 @@ class ContentScraper:
             try:
                 import base64
                 decoded = base64.b64decode(cookie_b64.strip()).decode("utf-8", errors="ignore")
+                if not self._is_authenticated_cookie(decoded):
+                    logger.warning("YOUTUBE_COOKIES_BASE64 does not contain active login credentials (missing LOGIN_INFO or SID).")
                 sanitized = self._sanitize_cookie_content(decoded)
                 with open(cookie_path, "w", encoding="utf-8") as f:
                     f.write(sanitized)
-                logger.info(f"Restored & sanitized YouTube cookies from YOUTUBE_COOKIES_BASE64 -> {cookie_path}")
+                logger.info(f"Restored YouTube cookies from YOUTUBE_COOKIES_BASE64 -> {cookie_path}")
                 return cookie_path
             except Exception as e:
                 logger.warning(f"Could not decode YOUTUBE_COOKIES_BASE64: {e}")
@@ -64,10 +72,12 @@ class ContentScraper:
         cookie_txt = os.getenv("YOUTUBE_COOKIES_TXT")
         if cookie_txt:
             try:
+                if not self._is_authenticated_cookie(cookie_txt):
+                    logger.warning("YOUTUBE_COOKIES_TXT does not contain active login credentials (missing LOGIN_INFO or SID).")
                 sanitized = self._sanitize_cookie_content(cookie_txt.strip())
                 with open(cookie_path, "w", encoding="utf-8") as f:
                     f.write(sanitized)
-                logger.info(f"Restored & sanitized YouTube cookies from YOUTUBE_COOKIES_TXT -> {cookie_path}")
+                logger.info(f"Restored YouTube cookies from YOUTUBE_COOKIES_TXT -> {cookie_path}")
                 return cookie_path
             except Exception as e:
                 logger.warning(f"Could not write YOUTUBE_COOKIES_TXT: {e}")
@@ -83,6 +93,8 @@ class ContentScraper:
                 try:
                     with open(c, "r", encoding="utf-8", errors="ignore") as f:
                         raw = f.read()
+                    if not self._is_authenticated_cookie(raw):
+                        logger.debug(f"Cookie file {c} has no authenticated login session tokens.")
                     sanitized = self._sanitize_cookie_content(raw)
                     with open(cookie_path, "w", encoding="utf-8") as f:
                         f.write(sanitized)
@@ -92,8 +104,13 @@ class ContentScraper:
 
         return None
 
+    def _get_proxy(self) -> Optional[str]:
+        """Returns proxy URL if configured via environment."""
+        return os.getenv("YOUTUBE_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+
     def _get_flat_ydl_opts(self) -> Dict[str, Any]:
         cookie_file = self._get_cookie_file()
+        proxy = self._get_proxy()
         opts: Dict[str, Any] = {
             "extract_flat": True,
             "skip_download": True,
@@ -104,7 +121,7 @@ class ContentScraper:
             "js_runtimes": {"node": {}},
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["visionos"]
+                    "player_client": ["android", "ios", "visionos"]
                 }
             },
             "http_headers": {
@@ -114,6 +131,8 @@ class ContentScraper:
         }
         if cookie_file:
             opts["cookiefile"] = cookie_file
+        if proxy:
+            opts["proxy"] = proxy
         return opts
 
     def fetch_candidates_from_channel(self, channel_url: str) -> List[Dict[str, Any]]:
@@ -247,76 +266,101 @@ class ContentScraper:
         except Exception:
             pass
 
+        proxy = self._get_proxy()
         cookie_file = self._get_cookie_file()
         if cookie_file:
-            logger.info(f"Using authenticated cookie file: {cookie_file}")
-        else:
-            logger.info("No cookie file detected. Using visionos / mobile client API to bypass datacenter bot checks.")
+            logger.info(f"Using cookie file: {cookie_file}")
+        if proxy:
+            logger.info(f"Using proxy: {proxy.split('@')[-1] if '@' in proxy else proxy}")
 
-        ydl_opts = {
-            "format": format_selector,
-            "outtmpl": video_out_tmpl,
-            "merge_output_format": "mp4",
-            "nopart": True,
-            "overwrites": True,
-            "windowsfilenames": True,
-            "quiet": False,
-            "no_warnings": True,
-            "ignoreerrors": False,
-            "js_runtimes": {"node": {}},
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["visionos"]
-                }
+        # Multi-tier strategies to gracefully handle bot challenges and cloud IP restrictions
+        strategies = [
+            {
+                "name": "android/ios mobile clients",
+                "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
+                "format": format_selector,
+                "use_cookies": True
             },
-            "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
+            {
+                "name": "default yt-dlp client",
+                "extractor_args": {},
+                "format": format_selector,
+                "use_cookies": True
+            },
+            {
+                "name": "visionos client",
+                "extractor_args": {"youtube": {"player_client": ["visionos"]}},
+                "format": format_selector,
+                "use_cookies": True
+            },
+            {
+                "name": "android 720p progressive fallback",
+                "extractor_args": {"youtube": {"player_client": ["android"]}},
+                "format": "best[height<=720]/best/18",
+                "use_cookies": False
+            },
+            {
+                "name": "web_embedded client",
+                "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
+                "format": "best[height<=720]/best",
+                "use_cookies": False
             }
-        }
-        if cookie_file:
-            ydl_opts["cookiefile"] = cookie_file
-        if ffmpeg_location:
-            ydl_opts["ffmpeg_location"] = ffmpeg_location
+        ]
 
         logger.info(f"Downloading source: [green]{title}[/green] ({vid_id})")
         downloaded_video_path = None
+        last_error = None
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                downloaded_video_path = ydl.prepare_filename(info)
-                # Ensure .mp4 extension if merged
-                base, _ = os.path.splitext(downloaded_video_path)
-                if os.path.exists(f"{base}.mp4"):
-                    downloaded_video_path = f"{base}.mp4"
-        except Exception as e:
-            err_str = str(e)
-            logger.warning(f"Download with visionos reported: {e}. Retrying with web_embedded client...")
-            ydl_opts_fallback = dict(ydl_opts)
-            ydl_opts_fallback.pop("cookiefile", None)
-            ydl_opts_fallback["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["web_embedded"]
+        for idx, strat in enumerate(strategies):
+            strat_name = strat["name"]
+            ydl_opts = {
+                "format": strat["format"],
+                "outtmpl": video_out_tmpl,
+                "merge_output_format": "mp4",
+                "nopart": True,
+                "overwrites": True,
+                "windowsfilenames": True,
+                "quiet": False,
+                "no_warnings": True,
+                "ignoreerrors": False,
+                "js_runtimes": {"node": {}},
+                "extractor_args": strat["extractor_args"],
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9",
                 }
             }
+            if strat["use_cookies"] and cookie_file:
+                ydl_opts["cookiefile"] = cookie_file
+            if proxy:
+                ydl_opts["proxy"] = proxy
+            if ffmpeg_location:
+                ydl_opts["ffmpeg_location"] = ffmpeg_location
+
             try:
-                with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
-                    info = ydl_fb.extract_info(url, download=True)
-                    downloaded_video_path = ydl_fb.prepare_filename(info)
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    downloaded_video_path = ydl.prepare_filename(info)
                     base, _ = os.path.splitext(downloaded_video_path)
                     if os.path.exists(f"{base}.mp4"):
                         downloaded_video_path = f"{base}.mp4"
-            except Exception as e2:
-                logger.warning(f"Fallback download also reported: {e2}. Resolving stream files on Windows...")
-                e = e2
-            import time, shutil
-            from utils.ffmpeg_helper import run_ffmpeg_cmd
+                if downloaded_video_path and os.path.exists(downloaded_video_path) and os.path.getsize(downloaded_video_path) > 100000:
+                    logger.info(f"Download succeeded using strategy: {strat_name}")
+                    break
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Download strategy '{strat_name}' failed for {vid_id}: {e}")
+                continue
 
-            expected_base = os.path.join(self.download_dir, f"{vid_id}_{safe_title}")
-            target_mp4 = f"{expected_base}.mp4"
+        # Post-download stream recovery & merger check
+        import time, shutil
+        from utils.ffmpeg_helper import run_ffmpeg_cmd
 
-            # 1. Check for .temp.mp4 lock recovery
+        expected_base = os.path.join(self.download_dir, f"{vid_id}_{safe_title}")
+        target_mp4 = f"{expected_base}.mp4"
+
+        # 1. Check for .temp.mp4 lock recovery
+        if not downloaded_video_path or not os.path.exists(downloaded_video_path):
             temp_candidates = glob.glob(os.path.join(self.download_dir, f"{vid_id}_*.temp.mp4"))
             if temp_candidates:
                 t_cand = temp_candidates[0]
@@ -331,24 +375,24 @@ class ContentScraper:
                     except Exception:
                         pass
 
-            # 2. Check if yt-dlp downloaded separate video and audio streams but failed during merger
-            if not downloaded_video_path or not os.path.exists(downloaded_video_path):
-                vid_files = [f for f in glob.glob(os.path.join(self.download_dir, f"{vid_id}_*.mp4")) if ".temp." not in f]
-                aud_files = glob.glob(os.path.join(self.download_dir, f"{vid_id}_*.m4a"))
-                if vid_files and aud_files:
-                    logger.info("Found separate video and audio tracks, merging with direct FFmpeg copy...")
-                    cmd_merge = [
-                        "ffmpeg", "-y", "-i", vid_files[0], "-i", aud_files[0],
-                        "-c", "copy", target_mp4
-                    ]
-                    success_merge, merge_err = run_ffmpeg_cmd(cmd_merge, timeout=120)
-                    if success_merge and os.path.exists(target_mp4) and os.path.getsize(target_mp4) > 1000000:
-                        downloaded_video_path = target_mp4
+        # 2. Check if yt-dlp downloaded separate video and audio streams but failed during merger
+        if not downloaded_video_path or not os.path.exists(downloaded_video_path):
+            vid_files = [f for f in glob.glob(os.path.join(self.download_dir, f"{vid_id}_*.mp4")) if ".temp." not in f]
+            aud_files = glob.glob(os.path.join(self.download_dir, f"{vid_id}_*.m4a"))
+            if vid_files and aud_files:
+                logger.info("Found separate video and audio tracks, merging with direct FFmpeg copy...")
+                cmd_merge = [
+                    "ffmpeg", "-y", "-i", vid_files[0], "-i", aud_files[0],
+                    "-c", "copy", target_mp4
+                ]
+                success_merge, merge_err = run_ffmpeg_cmd(cmd_merge, timeout=120)
+                if success_merge and os.path.exists(target_mp4) and os.path.getsize(target_mp4) > 1000000:
+                    downloaded_video_path = target_mp4
 
-            if not downloaded_video_path or not os.path.exists(downloaded_video_path):
-                logger.error(f"Download failed for {url}: {e}")
-                self.db.update_source_status(vid_id, "FAILED")
-                return None
+        if not downloaded_video_path or not os.path.exists(downloaded_video_path):
+            logger.error(f"Download failed for {url} across all strategies: {last_error}")
+            self.db.update_source_status(vid_id, "FAILED")
+            return None
 
         # Extract 16kHz mono audio for Whisper transcription using ffmpeg
         logger.info(f"Extracting mono audio for Whisper transcription: {audio_out_file}")
