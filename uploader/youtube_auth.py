@@ -18,6 +18,29 @@ class YouTubeAuth:
         self.token_file = token_file
         os.makedirs(os.path.dirname(os.path.abspath(token_file)), exist_ok=True)
 
+        # Auto-restore credentials from environment variables if deployed to cloud (e.g., Render)
+        secrets_env = os.getenv("YOUTUBE_CLIENT_SECRETS_JSON")
+        if secrets_env and not os.path.exists(self.client_secrets_file):
+            try:
+                base_dir = os.path.dirname(os.path.abspath(self.client_secrets_file))
+                if base_dir:
+                    os.makedirs(base_dir, exist_ok=True)
+                with open(self.client_secrets_file, "w", encoding="utf-8") as f:
+                    f.write(secrets_env)
+                logger.info(f"Restored {self.client_secrets_file} from YOUTUBE_CLIENT_SECRETS_JSON.")
+            except Exception as e:
+                logger.warning(f"Could not write client secrets from environment variable: {e}")
+
+        token_env = os.getenv("YOUTUBE_TOKEN_JSON")
+        if token_env and not os.path.exists(self.token_file):
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(self.token_file)), exist_ok=True)
+                with open(self.token_file, "w", encoding="utf-8") as f:
+                    f.write(token_env)
+                logger.info(f"Restored {self.token_file} from YOUTUBE_TOKEN_JSON.")
+            except Exception as e:
+                logger.warning(f"Could not write token from environment variable: {e}")
+
     def get_credentials(self, allow_browser: bool = False) -> Optional[Credentials]:
         """
         Retrieves or refreshes YouTube OAuth credentials.
