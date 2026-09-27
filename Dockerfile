@@ -1,18 +1,20 @@
 FROM python:3.11-slim
 
-# Install system dependencies: FFmpeg, git, and media libraries
+# Install system dependencies: FFmpeg, git, media libraries, and nodejs for yt-dlp JS challenges
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     fonts-liberation \
     ca-certificates \
     curl \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy requirements and install
+# Copy requirements and install (ensure pip and yt-dlp are updated)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application codebase
 COPY . .

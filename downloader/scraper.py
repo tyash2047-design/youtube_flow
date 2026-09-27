@@ -17,15 +17,71 @@ class ContentScraper:
         self.download_dir = config.get("paths", {}).get("temp_download_dir", "./data/downloads")
         os.makedirs(self.download_dir, exist_ok=True)
 
+    def _get_cookie_file(self) -> Optional[str]:
+        """
+        Locates or restores YouTube cookies from environment variables or local files.
+        Essential for cloud deployments (Render, AWS, GCP) to bypass bot verification.
+        """
+        cookie_path = os.path.join(self.download_dir, "cookies.txt")
+
+        # 1. Base64 encoded cookies from environment variable
+        cookie_b64 = os.getenv("YOUTUBE_COOKIES_BASE64")
+        if cookie_b64:
+            try:
+                import base64
+                decoded = base64.b64decode(cookie_b64.strip()).decode("utf-8", errors="ignore")
+                with open(cookie_path, "w", encoding="utf-8") as f:
+                    f.write(decoded)
+                logger.info(f"Restored YouTube cookies from YOUTUBE_COOKIES_BASE64 -> {cookie_path}")
+                return cookie_path
+            except Exception as e:
+                logger.warning(f"Could not decode YOUTUBE_COOKIES_BASE64: {e}")
+
+        # 2. Raw text cookies from environment variable
+        cookie_txt = os.getenv("YOUTUBE_COOKIES_TXT")
+        if cookie_txt:
+            try:
+                with open(cookie_path, "w", encoding="utf-8") as f:
+                    f.write(cookie_txt.strip())
+                logger.info(f"Restored YouTube cookies from YOUTUBE_COOKIES_TXT -> {cookie_path}")
+                return cookie_path
+            except Exception as e:
+                logger.warning(f"Could not write YOUTUBE_COOKIES_TXT: {e}")
+
+        # 3. Existing cookie files in repo / workspace
+        candidates = [
+            "./data/cookies.txt",
+            "./cookies.txt",
+            cookie_path
+        ]
+        for c in candidates:
+            if os.path.exists(c) and os.path.getsize(c) > 10:
+                return c
+
+        return None
+
     def _get_flat_ydl_opts(self) -> Dict[str, Any]:
-        return {
+        cookie_file = self._get_cookie_file()
+        opts: Dict[str, Any] = {
             "extract_flat": True,
             "skip_download": True,
             "quiet": True,
             "no_warnings": True,
             "playlist_items": "1-10",  # Check top 10 most recent videos per channel
             "ignoreerrors": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb"]
+                }
+            },
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
         }
+        if cookie_file:
+            opts["cookiefile"] = cookie_file
+        return opts
 
     def fetch_candidates_from_channel(self, channel_url: str) -> List[Dict[str, Any]]:
         """Scrapes recent video metadata from a channel URL without downloading."""
@@ -143,7 +199,13 @@ class ContentScraper:
                 pass
 
         max_res = self.sources_cfg.get("download_resolution", "1080")
-        format_selector = f"bestvideo[height<={max_res}][ext=mp4]+bestaudio[ext=m4a]/best[height<={max_res}][ext=mp4]/best"
+        format_selector = (
+            f"bestvideo[height<={max_res}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={max_res}]+bestaudio/"
+            f"best[height<={max_res}][ext=mp4]/"
+            f"best[height<={max_res}]/"
+            f"best"
+        )
 
         # Attempt to get ffmpeg path
         ffmpeg_location = None
@@ -151,6 +213,14 @@ class ContentScraper:
             ffmpeg_location = get_ffmpeg_path()
         except Exception:
             pass
+
+        cookie_file = self._get_cookie_file()
+        if cookie_file:
+            logger.info(f"Using authenticated cookie file: {cookie_file}")
+            player_clients = ["web", "mweb", "android", "ios"]
+        else:
+            logger.info("No cookie file detected. Using mobile client API to bypass datacenter bot checks.")
+            player_clients = ["android", "ios", "mweb"]
 
         ydl_opts = {
             "format": format_selector,
@@ -162,7 +232,18 @@ class ContentScraper:
             "quiet": False,
             "no_warnings": True,
             "ignoreerrors": False,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": player_clients
+                }
+            },
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
         }
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
         if ffmpeg_location:
             ydl_opts["ffmpeg_location"] = ffmpeg_location
 
