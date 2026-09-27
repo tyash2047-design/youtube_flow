@@ -70,6 +70,11 @@ class ContentScraper:
             "playlist_items": "1-10",  # Check top 10 most recent videos per channel
             "ignoreerrors": True,
             "js_runtimes": {"node": {}},
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["visionos", "android", "ios", "web"]
+                }
+            },
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
@@ -77,12 +82,6 @@ class ContentScraper:
         }
         if cookie_file:
             opts["cookiefile"] = cookie_file
-        else:
-            opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["android", "ios"]
-                }
-            }
         return opts
 
     def fetch_candidates_from_channel(self, channel_url: str) -> List[Dict[str, Any]]:
@@ -220,7 +219,7 @@ class ContentScraper:
         if cookie_file:
             logger.info(f"Using authenticated cookie file: {cookie_file}")
         else:
-            logger.info("No cookie file detected. Using mobile client API to bypass datacenter bot checks.")
+            logger.info("No cookie file detected. Using visionos / mobile client API to bypass datacenter bot checks.")
 
         ydl_opts = {
             "format": format_selector,
@@ -233,6 +232,11 @@ class ContentScraper:
             "no_warnings": True,
             "ignoreerrors": False,
             "js_runtimes": {"node": {}},
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["visionos", "android", "ios", "web"]
+                }
+            },
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
@@ -240,12 +244,6 @@ class ContentScraper:
         }
         if cookie_file:
             ydl_opts["cookiefile"] = cookie_file
-        else:
-            ydl_opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["android", "ios"]
-                }
-            }
         if ffmpeg_location:
             ydl_opts["ffmpeg_location"] = ffmpeg_location
 
@@ -261,7 +259,24 @@ class ContentScraper:
                 if os.path.exists(f"{base}.mp4"):
                     downloaded_video_path = f"{base}.mp4"
         except Exception as e:
-            logger.warning(f"Download process reported: {e}. Resolving stream files on Windows...")
+            err_str = str(e)
+            # If cookies failed, expired, or triggered bot check, retry cleanly with visionos without stale cookies
+            if "cookiefile" in ydl_opts and any(w in err_str.lower() for w in ["bot", "cookie", "sign in"]):
+                logger.warning(f"Cookie authentication failed ({e}). Retrying download without cookies using visionos client...")
+                ydl_opts_fallback = dict(ydl_opts)
+                ydl_opts_fallback.pop("cookiefile", None)
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl_fb:
+                        info = ydl_fb.extract_info(url, download=True)
+                        downloaded_video_path = ydl_fb.prepare_filename(info)
+                        base, _ = os.path.splitext(downloaded_video_path)
+                        if os.path.exists(f"{base}.mp4"):
+                            downloaded_video_path = f"{base}.mp4"
+                except Exception as e2:
+                    logger.warning(f"Fallback download also reported: {e2}. Resolving stream files on Windows...")
+                    e = e2
+            else:
+                logger.warning(f"Download process reported: {e}. Resolving stream files on Windows...")
             import time, shutil
             from utils.ffmpeg_helper import run_ffmpeg_cmd
 
