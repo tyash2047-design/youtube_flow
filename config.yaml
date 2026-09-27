@@ -6,12 +6,12 @@
 sources:
   # Channels to monitor (Gaming & viral entertainment influencers)
   channels:
-    - "https://www.youtube.com/@MrBeastGaming"
-    - "https://www.youtube.com/@MrBeast"
-    - "https://www.youtube.com/@whistlindiesel"
     - "https://www.youtube.com/@sshhuubb"
     - "https://www.youtube.com/@SlayyPop"
     - "https://www.youtube.com/@AyushBhandari"
+    - "https://www.youtube.com/@whistlindiesel"
+    - "https://www.youtube.com/@MrBeastGaming"
+    - "https://www.youtube.com/@MrBeast"
   
   # Search keywords for viral discovery
   keywords:

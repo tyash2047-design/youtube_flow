@@ -147,13 +147,12 @@ class PipelineRunner:
         max_to_process = self.config.get("sources", {}).get("max_videos_per_scrape", 2)
         candidates = []
 
-        # 1. Check Channels
+        # 1. Check Channels (Round-robin: collect top 2 new candidates per channel so one blocked channel doesn't stop the pipeline)
         for channel in self.config.get("sources", {}).get("channels", []):
             try:
                 new_vids = self.scraper.fetch_candidates_from_channel(channel)
-                candidates.extend(new_vids)
-                if len(candidates) >= max_to_process:
-                    break
+                if new_vids:
+                    candidates.extend(new_vids[:2])
             except Exception as e:
                 logger.error(f"Error checking channel {channel}: {e}")
 
@@ -163,7 +162,7 @@ class PipelineRunner:
                 try:
                     new_vids = self.scraper.search_candidates_by_keywords(kw, max_results=3)
                     candidates.extend(new_vids)
-                    if len(candidates) >= max_to_process:
+                    if len(candidates) >= max_to_process * 2:
                         break
                 except Exception as e:
                     logger.error(f"Error searching keyword {kw}: {e}")
@@ -172,13 +171,22 @@ class PipelineRunner:
             logger.info("No new candidate videos found during this discovery cycle.")
             return
 
-        # Process up to max_to_process videos
-        to_process = candidates[:max_to_process]
-        for vid in to_process:
+        # 3. Process candidates until max_to_process videos are successfully downloaded and rendered
+        logger.info(f"Discovered {len(candidates)} total candidate videos across channels. Aiming to process {max_to_process}...")
+        processed_success_count = 0
+        for vid in candidates:
+            if processed_success_count >= max_to_process:
+                break
             try:
-                self.process_single_source(vid)
+                count = self.process_single_source(vid)
+                if count and count > 0:
+                    processed_success_count += 1
+                else:
+                    logger.info(f"Source {vid.get('video_id')} did not yield rendered shorts. Trying next candidate...")
             except Exception as e:
                 logger.error(f"Failed to process video {vid.get('video_id')}: {e}", exc_info=True)
+
+        logger.info(f"Discovery cycle complete: {processed_success_count}/{max_to_process} videos processed.")
 
     def execute_scheduled_upload(self):
         """Pulls pending rendered shorts and publishes to YouTube."""
