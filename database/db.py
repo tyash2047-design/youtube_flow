@@ -248,3 +248,17 @@ class Database:
                 "today_uploads": today_uploads,
                 "today_quota_used": today_quota
             }
+
+    def get_recent_uploads(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Returns the most recent uploaded clips."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, title, viral_score, youtube_url, uploaded_at
+                FROM clips
+                WHERE status = 'UPLOADED' AND youtube_url IS NOT NULL
+                ORDER BY id DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
