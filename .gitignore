@@ -13,6 +13,8 @@ env/
 .env
 client_secrets.json
 data/youtube_token.json
+data/cookies.txt
+cookies.txt
 
 # Local Pipeline Database & Logs
 data/pipeline.db

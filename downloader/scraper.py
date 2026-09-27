@@ -69,11 +69,7 @@ class ContentScraper:
             "no_warnings": True,
             "playlist_items": "1-10",  # Check top 10 most recent videos per channel
             "ignoreerrors": True,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "ios", "mweb"]
-                }
-            },
+            "js_runtimes": {"node": {}},
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
@@ -81,6 +77,12 @@ class ContentScraper:
         }
         if cookie_file:
             opts["cookiefile"] = cookie_file
+        else:
+            opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["android", "ios"]
+                }
+            }
         return opts
 
     def fetch_candidates_from_channel(self, channel_url: str) -> List[Dict[str, Any]]:
@@ -217,10 +219,8 @@ class ContentScraper:
         cookie_file = self._get_cookie_file()
         if cookie_file:
             logger.info(f"Using authenticated cookie file: {cookie_file}")
-            player_clients = ["web", "mweb", "android", "ios"]
         else:
             logger.info("No cookie file detected. Using mobile client API to bypass datacenter bot checks.")
-            player_clients = ["android", "ios", "mweb"]
 
         ydl_opts = {
             "format": format_selector,
@@ -232,11 +232,7 @@ class ContentScraper:
             "quiet": False,
             "no_warnings": True,
             "ignoreerrors": False,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": player_clients
-                }
-            },
+            "js_runtimes": {"node": {}},
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
@@ -244,6 +240,12 @@ class ContentScraper:
         }
         if cookie_file:
             ydl_opts["cookiefile"] = cookie_file
+        else:
+            ydl_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["android", "ios"]
+                }
+            }
         if ffmpeg_location:
             ydl_opts["ffmpeg_location"] = ffmpeg_location
 

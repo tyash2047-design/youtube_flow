@@ -116,6 +116,13 @@ class PipelineRunner:
                 if rendered_path:
                     self.db.update_clip_rendered(clip_id, rendered_path)
                     rendered_count += 1
+                    
+                    # Auto-publish immediately as soon as ready
+                    if self.scheduler_cfg.get("post_immediately", True):
+                        logger.info(f"⚡ Instant Upload: Publishing Short #{clip_id} to YouTube right now...")
+                        ready_clips = self.db.get_ready_to_upload_clips(limit=1)
+                        if ready_clips:
+                            self.uploader.upload_short(ready_clips[0])
                 else:
                     self.db.update_clip_failed(clip_id, "Rendering failed")
 
@@ -174,23 +181,31 @@ class PipelineRunner:
                 logger.error(f"Failed to process video {vid.get('video_id')}: {e}", exc_info=True)
 
     def execute_scheduled_upload(self):
-        """Pulls the highest-scoring pending rendered short and publishes to YouTube."""
-        logger.info(">>> Checking for scheduled YouTube Shorts upload <<<")
-        if not self.db.can_upload_today(self.config.get("uploader", {}).get("max_daily_uploads", 4)):
-            logger.info("Daily upload limit reached. Skipping upload job.")
-            return
+        """Pulls pending rendered shorts and publishes to YouTube."""
+        logger.info(">>> Checking for YouTube Shorts upload queue <<<")
+        max_uploads = self.config.get("uploader", {}).get("max_daily_uploads", 0)
 
-        ready_clips = self.db.get_ready_to_upload_clips(limit=1)
-        if not ready_clips:
-            logger.info("No rendered clips currently waiting in queue to upload.")
-            return
+        while True:
+            if not self.db.can_upload_today(max_uploads):
+                logger.info("Daily upload limit reached. Skipping upload job.")
+                break
 
-        clip = ready_clips[0]
-        logger.info(f"Selected clip for upload: #{clip['id']} - '{clip['title']}' (Viral Score: {clip['viral_score']})")
-        try:
-            self.uploader.upload_short(clip)
-        except Exception as e:
-            logger.error(f"Error during scheduled upload of clip {clip['id']}: {e}", exc_info=True)
+            ready_clips = self.db.get_ready_to_upload_clips(limit=1)
+            if not ready_clips:
+                logger.info("No rendered clips currently waiting in queue to upload.")
+                break
+
+            clip = ready_clips[0]
+            logger.info(f"Selected clip for upload: #{clip['id']} - '{clip['title']}' (Viral Score: {clip['viral_score']})")
+            try:
+                self.uploader.upload_short(clip)
+            except Exception as e:
+                logger.error(f"Error during upload of clip {clip['id']}: {e}", exc_info=True)
+                break
+
+            # If not in immediate upload mode, only upload 1 clip per scheduled trigger
+            if not self.scheduler_cfg.get("post_immediately", True):
+                break
 
     def cleanup_old_rendered_files(self):
         """Removes old rendered shorts older than configured retention period."""
@@ -227,19 +242,29 @@ class PipelineRunner:
             replace_existing=True
         )
 
-        # 2. Upload Times (Cron schedules throughout the day)
-        upload_times = self.scheduler_cfg.get("upload_times", ["09:30", "13:00", "17:30", "21:00"])
-        for idx, t_str in enumerate(upload_times):
-            parts = t_str.split(":")
-            if len(parts) == 2:
-                hr, mn = int(parts[0]), int(parts[1])
-                scheduler.add_job(
-                    self.execute_scheduled_upload,
-                    trigger=CronTrigger(hour=hr, minute=mn),
-                    id=f"upload_job_{idx}",
-                    name=f"Upload Short at {t_str}",
-                    replace_existing=True
-                )
+        # 2. Upload Poller (Checks every 2 minutes for instant publishing)
+        if self.scheduler_cfg.get("post_immediately", True):
+            scheduler.add_job(
+                self.execute_scheduled_upload,
+                trigger=IntervalTrigger(minutes=2),
+                id="instant_upload_poller",
+                name="Instant Upload Poller (2 min)",
+                replace_existing=True
+            )
+        else:
+            # Fixed times throughout the day
+            upload_times = self.scheduler_cfg.get("upload_times", ["09:30", "13:00", "17:30", "21:00"])
+            for idx, t_str in enumerate(upload_times):
+                parts = t_str.split(":")
+                if len(parts) == 2:
+                    hr, mn = int(parts[0]), int(parts[1])
+                    scheduler.add_job(
+                        self.execute_scheduled_upload,
+                        trigger=CronTrigger(hour=hr, minute=mn),
+                        id=f"upload_job_{idx}",
+                        name=f"Upload Short at {t_str}",
+                        replace_existing=True
+                    )
 
         # 3. Daily Housekeeping (Pruning old clips)
         scheduler.add_job(

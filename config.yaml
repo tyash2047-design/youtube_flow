@@ -114,6 +114,9 @@ uploader:
 
 # 6. 24/7 SCHEDULER & AUTONOMOUS ENGINE
 scheduler:
+  # Publish immediately as soon as a clip finishes rendering
+  post_immediately: true
+
   # How often to check channels for new content (in hours)
   scrape_interval_hours: 4
   

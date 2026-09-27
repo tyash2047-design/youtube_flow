@@ -1,5 +1,6 @@
 # Core Scraping & Video Processing
 yt-dlp>=2025.1.15
+yt-dlp-ejs>=0.8.0
 imageio-ffmpeg>=0.5.1
 moviepy>=1.0.3
 opencv-python>=4.10.0.84
