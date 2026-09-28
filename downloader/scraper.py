@@ -247,8 +247,22 @@ class ContentScraper:
         video_out_tmpl = os.path.join(self.download_dir, f"{vid_id}_{safe_title}.%(ext)s")
         audio_out_file = os.path.join(self.download_dir, f"{vid_id}_{safe_title}.wav")
 
-        # Record in DB
-        self.db.add_source(vid_id, url, title, channel, duration)
+        expected_base = os.path.join(self.download_dir, f"{vid_id}_{safe_title}")
+        target_mp4 = f"{expected_base}.mp4"
+
+        # Check if already downloaded and valid on disk
+        if os.path.exists(target_mp4) and os.path.getsize(target_mp4) > 1000000 and os.path.exists(audio_out_file) and os.path.getsize(audio_out_file) > 100000:
+            logger.info(f"Source video and audio already exist on disk, reusing: {target_mp4}")
+            self.db.update_source_downloaded(vid_id, target_mp4, audio_out_file)
+            return {
+                "video_id": vid_id,
+                "video_path": target_mp4,
+                "audio_path": audio_out_file,
+                "title": title,
+                "channel": channel,
+                "duration": duration,
+                "url": url
+            }
 
         # Clean up any partial/stale files for this video ID before starting to avoid HTTP 416 range errors
         import glob
