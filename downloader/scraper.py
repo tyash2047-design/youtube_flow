@@ -105,8 +105,16 @@ class ContentScraper:
         return None
 
     def _get_proxy(self) -> Optional[str]:
-        """Returns proxy URL if configured via environment."""
-        return os.getenv("YOUTUBE_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+        """Returns proxy URL if configured via environment, ignoring dummy/placeholder examples."""
+        proxy = os.getenv("YOUTUBE_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+        if not proxy:
+            return None
+        proxy = proxy.strip()
+        dummy_markers = ["proxy_ip", "username:password", "example.com", "your_proxy", "ip:port"]
+        if any(marker in proxy for marker in dummy_markers):
+            logger.warning(f"Ignoring placeholder/dummy proxy value: {proxy}")
+            return None
+        return proxy
 
     def _get_flat_ydl_opts(self) -> Dict[str, Any]:
         cookie_file = self._get_cookie_file()
