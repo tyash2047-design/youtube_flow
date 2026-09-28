@@ -75,22 +75,33 @@ class Database:
             # Indexes for fast lookup
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sources_vid ON sources(video_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_status ON clips(status);")
+            
+            # Reset any failed sources from previous bot blocks so they can be re-attempted
+            cursor.execute("UPDATE sources SET status = 'DISCOVERED' WHERE status = 'FAILED';")
             conn.commit()
 
     # --- Sources API ---
     def is_source_processed(self, video_id: str) -> bool:
-        """Checks if a long-form video has already been recorded in the database."""
+        """Checks if a long-form video has already been successfully processed or downloaded."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM sources WHERE video_id = ?", (video_id,))
-            return cursor.fetchone() is not None
+            cursor.execute("SELECT status FROM sources WHERE video_id = ?", (video_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            status = row["status"] if isinstance(row, sqlite3.Row) else row[0]
+            # Only consider processed if it was successfully downloaded or completed
+            return status in ("PROCESSED", "DOWNLOADED")
 
     def add_source(self, video_id: str, url: str, title: str, channel: str, duration: int) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR IGNORE INTO sources (video_id, url, title, channel, duration, status)
+                INSERT INTO sources (video_id, url, title, channel, duration, status)
                 VALUES (?, ?, ?, ?, ?, 'DISCOVERED')
+                ON CONFLICT(video_id) DO UPDATE SET 
+                    status = 'DISCOVERED'
+                WHERE status = 'FAILED'
             """, (video_id, url, title, channel, duration))
             conn.commit()
             return cursor.lastrowid
