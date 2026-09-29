@@ -2,10 +2,14 @@ import os
 import json
 import re
 from typing import Dict, Any, List
+from dotenv import load_dotenv
 from utils.logger import logger
+
+load_dotenv()
 
 class MetadataGenerator:
     def __init__(self, config: Dict[str, Any]):
+        load_dotenv()
         self.config = config
         self.uploader_cfg = config.get("uploader", {})
         self.clipping_cfg = config.get("clipping", {})

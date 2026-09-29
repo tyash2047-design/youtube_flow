@@ -2,10 +2,14 @@ import os
 import json
 import re
 from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv
 from utils.logger import logger
+
+load_dotenv()
 
 class HighlightDetector:
     def __init__(self, config: Dict[str, Any]):
+        load_dotenv()
         self.config = config
         self.clip_cfg = config.get("clipping", {})
         self.min_clip_sec = self.clip_cfg.get("min_clip_seconds", 15)
