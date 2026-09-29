@@ -32,6 +32,47 @@ class SubtitleGenerator:
         v_pct = self.sub_cfg.get("vertical_position", 0.68)
         self.margin_v = int(1920 * (1.0 - v_pct))
 
+    def _transliterate_to_hinglish(self, words: List[str]) -> List[str]:
+        """
+        Converts Hindi/Devanagari/Urdu words into natural conversational Hinglish (Roman script)
+        preserving the exact 1-to-1 word count and order using Gemini.
+        """
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key or not words:
+            return words
+
+        try:
+            import json, re
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            prompt = f"""
+You are a bilingual Hindi-English expert.
+Convert the following list of Hindi/Devanagari/Urdu words into natural, modern conversational HINGLISH (Hindi written in Roman/Latin English letters).
+CRITICAL:
+1. Return EXACTLY the same number of words ({len(words)} words) in the exact same order.
+2. Use modern conversational Hinglish spellings (e.g. 'Yeh', 'Kya', 'Bhai', 'Slay Point', 'Matlab', 'Pagal').
+3. Return ONLY a valid JSON object matching:
+{{"hinglish_words": ["word1", "word2", ...]}}
+
+Words: {json.dumps(words, ensure_ascii=False)}
+"""
+            model = self.config.get("clipping", {}).get("gemini_model", "gemini-3.5-flash-lite")
+            res = client.models.generate_content(model=model, contents=prompt)
+            cleaned = res.text.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                data = json.loads(match.group(0))
+                hw = data.get("hinglish_words", [])
+                if len(hw) == len(words):
+                    logger.info(f"Transliterated {len(words)} subtitle words into Hinglish.")
+                    return [w.upper() for w in hw]
+        except Exception as e:
+            logger.warning(f"Hinglish subtitle transliteration error: {e}")
+        return words
+
     def generate_ass(self, words_list: List[Dict[str, Any]], clip_start: float, clip_end: float, output_ass_path: str) -> str:
         """
         Creates an Alex Hormozi style ASS subtitle file with animated active word highlights.
@@ -61,6 +102,16 @@ class SubtitleGenerator:
             with open(output_ass_path, "w", encoding="utf-8") as f:
                 f.write("[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\n[Events]\n")
             return output_ass_path
+
+        # Check if words contain Indic (Hindi/Devanagari) or Urdu characters
+        sample_text = "".join(w["word"] for w in clip_words)
+        has_indic = any(0x0900 <= ord(c) <= 0x097F or 0x0600 <= ord(c) <= 0x06FF for c in sample_text)
+        if has_indic:
+            raw_words = [w["word"] for w in clip_words]
+            hinglish_words = self._transliterate_to_hinglish(raw_words)
+            if len(hinglish_words) == len(clip_words):
+                for idx, hw in enumerate(hinglish_words):
+                    clip_words[idx]["word"] = hw.upper()
 
         # Group words into bursts of 2-4 words
         bursts = []

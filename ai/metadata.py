@@ -50,6 +50,19 @@ class MetadataGenerator:
         - Description with #shorts and viral tags
         - Relevant keyword tags array
         """
+        # Check if source or clip contains Indic/Hindi text or Indian channel handles
+        is_hindi = (
+            any(0x0900 <= ord(c) <= 0x097F or 0x0600 <= ord(c) <= 0x06FF for c in clip_transcript + source_metadata.get("title", ""))
+            or any(h in source_metadata.get("channel", "").lower() for h in ["slayy", "shubh", "ayush", "carry", "hindi", "bhandari"])
+        )
+
+        lang_rule = (
+            "4. MANDATORY HINGLISH: The video is in Hindi/Hinglish. The Title, Description, and Tags MUST be in conversational HINGLISH "
+            "(Latin alphabet / English letters, e.g. 'Slayy Point ko threat kisne diya?! 💀 #shorts'). NEVER use Devanagari (हिंदी) or Urdu script under any circumstances!"
+            if is_hindi else
+            "4. Language: Use the native language of the video (Latin/English script)."
+        )
+
         prompt = f"""
 You are an expert YouTube Shorts algorithm strategist.
 Create the perfect viral metadata for this YouTube Short clip.
@@ -58,12 +71,13 @@ Source Video Title: "{source_metadata.get('title', 'Unknown')}"
 Original Channel: "{source_metadata.get('channel', 'Unknown')}"
 Clip Hook: "{clip_info.get('hook', '')}"
 Clip Transcript Snippet:
-\"\"\"{clip_transcript[:500]}\"\"\"
+\"\"\"{clip_transcript[:800]}\"\"\"
 
 REQUIREMENTS:
 1. Title: Under 60 characters total. Must trigger intense curiosity or emotion. Include 1 relevant emoji. Do NOT use generic titles like 'Interesting Moment'. Make it feel urgent or shocking.
 2. Description: 2-3 engaging sentences summarizing the clip, a question to drive comments, and 4-6 hashtags (MUST include #shorts, #viral, #trending).
 3. Tags: 8-12 concise, highly searched keyword tags.
+{lang_rule}
 
 Respond ONLY with valid JSON:
 {{

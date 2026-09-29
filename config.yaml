@@ -65,6 +65,7 @@ video:
 # 4. TRENDY DYNAMIC SUBTITLES (Alex Hormozi Style)
 subtitles:
   enabled: true
+  hinglish_subtitles: true       # Transliterate Hindi/Devanagari/Urdu speech into trendy conversational Hinglish (Roman script)
   # Font name (Ensure installed on Windows, e.g. Arial Black, Montserrat, Impact)
   font_name: "Arial Black"
   font_size: 46

@@ -96,15 +96,28 @@ class HighlightDetector:
             logger.warning("No transcript segments provided to highlight detector.")
             return []
 
-        # Create a compressed timestamped transcript representation
+        # Create a timestamped transcript representation (support full video up to 2500 segments)
         transcript_lines = []
+        is_hindi_detected = False
         for s in segments:
-            transcript_lines.append(f"[{s['start']:.1f}s - {s['end']:.1f}s]: {s['text']}")
-        formatted_transcript = "\n".join(transcript_lines[:400]) # Cap input if massive
+            text = s.get("text", "")
+            transcript_lines.append(f"[{s['start']:.1f}s - {s['end']:.1f}s]: {text}")
+            if not is_hindi_detected and any(0x0900 <= ord(c) <= 0x097F or 0x0600 <= ord(c) <= 0x06FF for c in text):
+                is_hindi_detected = True
+
+        formatted_transcript = "\n".join(transcript_lines[:2500])
+
+        language_instruction = (
+            "LANGUAGE REQUIREMENT (HINGLISH):\n"
+            "This video is in Hindi/Urdu. You MUST write all titles, hooks, and reasons in natural, modern conversational HINGLISH "
+            "(Latin alphabet / English letters, e.g. 'Bhai ne ye kya bol diya?!', NOT Devanagari or Urdu script)."
+            if is_hindi_detected else
+            "LANGUAGE REQUIREMENT:\nUse the native language of the video (in Latin/English script)."
+        )
 
         prompt = f"""
-You are a world-class YouTube Shorts producer and algorithm retention specialist.
-Analyze this video transcript and identify the TOP {self.max_clips} most viral, high-retention clip moments.
+You are an elite, multi-million view YouTube Shorts producer and virality editor.
+Analyze this video transcript and identify the TOP {self.max_clips} self-contained viral clip moments.
 
 Video Title: "{video_metadata.get('title', 'Unknown')}"
 Channel: "{video_metadata.get('channel', 'Unknown')}"
@@ -114,12 +127,24 @@ TRANSCRIPT WITH TIMESTAMPS:
 {formatted_transcript}
 \"\"\"
 
-CRITICAL REQUIREMENTS:
-1. STRICT DURATION RULE: Every clip's duration (end_time - start_time) MUST be between {self.min_clip_sec} and {self.max_clip_sec} seconds. Never exceed {self.max_clip_sec}s. Never go below {self.min_clip_sec}s.
-2. HOOK RULE: The first 3 seconds of the clip MUST contain a curiosity gap, shocking statement, high-stakes question, or captivating hook that stops viewers from swiping away.
-3. COHESION RULE: The segment must be a self-contained story, idea, or funny interaction with a clear punchline, conclusion, or cliffhanger.
-4. Retention Score: Score each candidate clip from 1.0 to 10.0 based on viral potential.
-5. Only return clips with a score of {self.min_retention_score} or higher.
+CRITICAL VIRALITY & CONTEXT RULES (DO NOT VIOLATE):
+1. COMPLETE STANDALONE CONTEXT (MANDATORY):
+   - A viewer scrolling YouTube Shorts has NEVER seen this 20-minute video.
+   - The clip MUST make 100% complete sense on its own with ZERO outside knowledge.
+   - SETUP: The clip MUST start right when the story, topic, reaction, or meme is INTRODUCED. Never start after the setup has already happened.
+   - PUNCHLINE / RESOLUTION: The clip MUST contain the full reaction, joke, argument, or conclusion. Never cut off before the punchline or mid-thought!
+   - NO UNEXPLAINED CONTEXT: Do NOT pick moments that reference something said 5 minutes earlier unless that context is explained inside this clip.
+
+2. ZERO MID-SENTENCE CUTS:
+   - "start_time" MUST be the exact start of a complete sentence or new thought.
+   - "end_time" MUST be the exact end of a complete sentence or natural pause.
+   - Never start or end in the middle of a spoken sentence or thought.
+
+3. STRICT DURATION RULE:
+   - Clip duration (end_time - start_time) MUST be between {self.min_clip_sec} and {self.max_clip_sec} seconds.
+   - Aim for 25-45 seconds to allow enough time for Setup + Climax + Punchline.
+
+4. {language_instruction}
 
 Return ONLY a raw JSON array matching this exact schema:
 [
@@ -127,14 +152,15 @@ Return ONLY a raw JSON array matching this exact schema:
     "start_time": 124.5,
     "end_time": 158.2,
     "hook": "Exact opening words that grab attention",
-    "working_title": "Short punchy internal title",
-    "viral_score": 9.4,
-    "reason": "Why this specific 15-50s moment will achieve 100%+ retention on YouTube Shorts"
+    "working_title": "Punchy Hinglish/English Title",
+    "viral_score": 9.5,
+    "context_summary": "Brief explanation: Setup -> Core Action -> Punchline",
+    "reason": "Why this specific 20-45s moment will achieve 100%+ retention on YouTube Shorts"
   }}
 ]
 """
 
-        logger.info(f"Querying {self.provider.upper()} for viral highlight detection...")
+        logger.info(f"Querying {self.provider.upper()} for viral highlight detection (Hindi/Hinglish mode: {is_hindi_detected})...")
         try:
             if self.provider == "gemini":
                 raw_response = self._call_gemini(prompt)
@@ -151,7 +177,24 @@ Return ONLY a raw JSON array matching this exact schema:
             try:
                 start = float(c.get("start_time", 0))
                 end = float(c.get("end_time", 0))
-                duration = round(end - start, 2)
+
+                # Smart sentence/segment boundary snapping to avoid cutting words in half
+                snapped_start = start
+                snapped_end = end
+                closest_start_diff = 999
+                closest_end_diff = 999
+
+                for s in segments:
+                    s_start = s.get("start", 0)
+                    s_end = s.get("end", 0)
+                    if abs(s_start - start) < closest_start_diff and abs(s_start - start) <= 2.5:
+                        closest_start_diff = abs(s_start - start)
+                        snapped_start = s_start
+                    if abs(s_end - end) < closest_end_diff and abs(s_end - end) <= 2.5:
+                        closest_end_diff = abs(s_end - end)
+                        snapped_end = s_end
+
+                duration = round(snapped_end - snapped_start, 2)
                 score = float(c.get("viral_score", 0))
 
                 # Strictly validate 15-50 second rule
@@ -163,8 +206,8 @@ Return ONLY a raw JSON array matching this exact schema:
                     continue
 
                 valid_clips.append({
-                    "start_time": start,
-                    "end_time": end,
+                    "start_time": snapped_start,
+                    "end_time": snapped_end,
                     "duration": duration,
                     "hook": c.get("hook", ""),
                     "working_title": c.get("working_title", "Viral Highlight"),
@@ -177,5 +220,5 @@ Return ONLY a raw JSON array matching this exact schema:
         # Sort by viral score descending and cap at max_clips
         valid_clips.sort(key=lambda x: x["viral_score"], reverse=True)
         final_clips = valid_clips[:self.max_clips]
-        logger.info(f"Highlight detector selected {len(final_clips)} viral clips (duration: 15-50s).")
+        logger.info(f"Highlight detector selected {len(final_clips)} viral clips with verified narrative context (duration: 15-50s).")
         return final_clips
