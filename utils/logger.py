@@ -2,8 +2,16 @@ import os
 import sys
 import logging
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 try:
     from rich.logging import RichHandler
+    from rich.console import Console
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
@@ -22,7 +30,9 @@ def setup_logger(name: str = "yt_pipeline", log_file: str = "data/pipeline.log")
 
     # Console Handler
     if HAS_RICH:
+        rich_console = Console(force_terminal=True, legacy_windows=False)
         console_handler = RichHandler(
+            console=rich_console,
             rich_tracebacks=True,
             show_time=True,
             show_path=False,

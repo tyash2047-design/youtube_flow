@@ -116,6 +116,60 @@ class ContentScraper:
             return None
         return proxy
 
+    def _download_via_external_api(self, url: str, output_path: str) -> bool:
+        """
+        Fallback external downloader for datacenter IPs (e.g. Render/AWS) where YouTube
+        blocks direct yt-dlp connections with bot verification.
+        Supports:
+        1. Custom EXTERNAL_DOWNLOADER_URL or COBALT_API_URL environment variables
+        2. RapidAPI or public media downloader endpoints
+        """
+        import requests
+        ext_url = os.getenv("EXTERNAL_DOWNLOADER_URL") or os.getenv("COBALT_API_URL")
+        endpoints = []
+        if ext_url:
+            endpoints.append(ext_url.strip())
+
+        endpoints.extend([
+            "https://api.cobalt.tools",
+            "https://cobalt.canine.tools",
+        ])
+
+        for ep in endpoints:
+            try:
+                clean_ep = ep.rstrip("/")
+                headers = {"Accept": "application/json", "Content-Type": "application/json"}
+                api_key = os.getenv("EXTERNAL_DOWNLOADER_KEY") or os.getenv("COBALT_API_KEY")
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+
+                logger.info(f"Querying external downloader endpoint: {clean_ep}")
+                resp = requests.post(
+                    f"{clean_ep}/",
+                    json={"url": url, "videoQuality": "720", "downloadMode": "auto"},
+                    headers=headers,
+                    timeout=15
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    stream_url = data.get("url")
+                    if stream_url:
+                        logger.info(f"External downloader provided media stream URL. Downloading stream...")
+                        with requests.get(stream_url, stream=True, timeout=90) as r:
+                            r.raise_for_status()
+                            with open(output_path, "wb") as f:
+                                for chunk in r.iter_content(chunk_size=1024 * 1024):
+                                    if chunk:
+                                        f.write(chunk)
+                        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000000:
+                            logger.info(f"Successfully downloaded via external API: {clean_ep}")
+                            return True
+            except Exception as e:
+                logger.debug(f"External downloader endpoint {ep} returned: {e}")
+                continue
+
+        return False
+
     def _get_flat_ydl_opts(self) -> Dict[str, Any]:
         cookie_file = self._get_cookie_file()
         proxy = self._get_proxy()
@@ -416,13 +470,11 @@ class ContentScraper:
             aud_files = glob.glob(os.path.join(self.download_dir, f"{vid_id}_*.m4a"))
             if vid_files and aud_files:
                 logger.info("Found separate video and audio tracks, merging with direct FFmpeg copy...")
-                cmd_merge = [
-                    "ffmpeg", "-y", "-i", vid_files[0], "-i", aud_files[0],
-                    "-c", "copy", target_mp4
-                ]
-                success_merge, merge_err = run_ffmpeg_cmd(cmd_merge, timeout=120)
-                if success_merge and os.path.exists(target_mp4) and os.path.getsize(target_mp4) > 1000000:
-                    downloaded_video_path = target_mp4
+        # 3. If yt-dlp strategies failed (e.g. datacenter IP bot challenge), try external downloader fallback
+        if not downloaded_video_path or not os.path.exists(downloaded_video_path):
+            logger.info("Direct yt-dlp strategies blocked or failed. Attempting external downloader fallback...")
+            if self._download_via_external_api(url, target_mp4):
+                downloaded_video_path = target_mp4
 
         if not downloaded_video_path or not os.path.exists(downloaded_video_path):
             logger.error(f"Download failed for {url} across all strategies: {last_error}")

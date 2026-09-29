@@ -119,7 +119,7 @@ class PipelineRunner:
                     
                     # Auto-publish immediately as soon as ready
                     if self.scheduler_cfg.get("post_immediately", True):
-                        logger.info(f"⚡ Instant Upload: Publishing Short #{clip_id} to YouTube right now...")
+                        logger.info(f"[bold yellow]Instant Upload:[/bold yellow] Publishing Short #{clip_id} to YouTube right now...")
                         ready_clips = self.db.get_ready_to_upload_clips(limit=1)
                         if ready_clips:
                             self.uploader.upload_short(ready_clips[0])
