@@ -39,12 +39,12 @@ clipping:
   # LLM Provider for transcript analysis & metadata generation
   # Options: 'gemini' (recommended: fast, multimodal) or 'openai'
   llm_provider: "gemini"
-  gemini_model: "gemini-3.6-flash"
+  gemini_model: "gemini-3.5-flash-lite"
   openai_model: "gpt-4o-mini"
 
   # Local Whisper Model for transcription
-  # Options: 'base', 'small', 'medium' ('small' is ideal balance for speed/accuracy)
-  whisper_model_size: "small"
+  # Options: 'base', 'small', 'medium' ('base' is fast on CPU, 'small' is higher accuracy)
+  whisper_model_size: "base"
   whisper_device: "auto"         # 'cuda' if NVIDIA GPU available, else 'cpu'
 
 # 3. VIDEO FRAMING & 9:16 RENDERING
