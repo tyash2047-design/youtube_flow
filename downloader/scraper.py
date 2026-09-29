@@ -301,31 +301,43 @@ class ContentScraper:
                 "name": "android/ios mobile clients",
                 "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
                 "format": format_selector,
-                "use_cookies": True
+                "use_cookies": True,
+                "custom_headers": False
+            },
+            {
+                "name": "mweb / tv client",
+                "extractor_args": {"youtube": {"player_client": ["mweb", "tv"]}},
+                "format": format_selector,
+                "use_cookies": True,
+                "custom_headers": False
             },
             {
                 "name": "default yt-dlp client",
                 "extractor_args": {},
                 "format": format_selector,
-                "use_cookies": True
+                "use_cookies": True,
+                "custom_headers": True
             },
             {
                 "name": "visionos client",
                 "extractor_args": {"youtube": {"player_client": ["visionos"]}},
                 "format": format_selector,
-                "use_cookies": True
+                "use_cookies": True,
+                "custom_headers": False
             },
             {
                 "name": "android 720p progressive fallback",
                 "extractor_args": {"youtube": {"player_client": ["android"]}},
                 "format": "best[height<=720]/best/18",
-                "use_cookies": False
+                "use_cookies": False,
+                "custom_headers": False
             },
             {
                 "name": "web_embedded client",
                 "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
                 "format": "best[height<=720]/best",
-                "use_cookies": False
+                "use_cookies": False,
+                "custom_headers": False
             }
         ]
 
@@ -346,12 +358,13 @@ class ContentScraper:
                 "no_warnings": True,
                 "ignoreerrors": False,
                 "js_runtimes": {"node": {}},
-                "extractor_args": strat["extractor_args"],
-                "http_headers": {
+                "extractor_args": strat["extractor_args"]
+            }
+            if strat.get("custom_headers"):
+                ydl_opts["http_headers"] = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                     "Accept-Language": "en-US,en;q=0.9",
                 }
-            }
             if strat["use_cookies"] and cookie_file:
                 ydl_opts["cookiefile"] = cookie_file
             if proxy:
