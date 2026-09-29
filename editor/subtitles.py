@@ -12,6 +12,27 @@ def format_ass_time(seconds: float) -> str:
         cs = 99
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
+def phonetic_devanagari_to_hinglish(text: str) -> str:
+    """Bulletproof phonetic transliteration mapping Devanagari characters to Latin Hinglish."""
+    charmap = {
+        'अ': 'A', 'आ': 'AA', 'इ': 'I', 'ई': 'EE', 'उ': 'U', 'ऊ': 'OO', 'ऋ': 'RI',
+        'ए': 'E', 'ऐ': 'AI', 'ओ': 'O', 'औ': 'AU', 'अं': 'AN', 'अः': 'AH',
+        'क': 'K', 'ख': 'KH', 'ग': 'G', 'घ': 'GH', 'ङ': 'NG',
+        'च': 'CH', 'छ': 'CHH', 'ज': 'J', 'झ': 'JH', 'ञ': 'NY',
+        'ट': 'T', 'ठ': 'TH', 'ड': 'D', 'ढ': 'DH', 'ण': 'N',
+        'त': 'T', 'थ': 'TH', 'द': 'D', 'ध': 'DH', 'न': 'N',
+        'प': 'P', 'फ': 'PH', 'ब': 'B', 'भ': 'BH', 'म': 'M',
+        'य': 'Y', 'र': 'R', 'ल': 'L', 'व': 'V', 'श': 'SH', 'ष': 'SH', 'स': 'S', 'ह': 'H',
+        'ा': 'A', 'ि': 'I', 'ी': 'EE', 'ु': 'U', 'ू': 'OO', 'ृ': 'RI',
+        'े': 'E', 'ै': 'AI', 'ो': 'O', 'ौ': 'AU', 'ं': 'N', 'ँ': 'N', 'ः': 'H',
+        '़': '', '्': '', '।': '.', '॥': '.', '०': '0', '१': '1', '२': '2', '३': '3',
+        '४': '4', '५': '5', '६': '6', '७': '7', '८': '8', '९': '9'
+    }
+    result = []
+    for c in text:
+        result.append(charmap.get(c, c))
+    return "".join(result)
+
 class SubtitleGenerator:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -35,43 +56,55 @@ class SubtitleGenerator:
     def _transliterate_to_hinglish(self, words: List[str]) -> List[str]:
         """
         Converts Hindi/Devanagari/Urdu words into natural conversational Hinglish (Roman script)
-        preserving the exact 1-to-1 word count and order using Gemini.
+        preserving the exact 1-to-1 word count and order using Gemini with phonetic fallback.
         """
         api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key or not words:
+        if not words:
             return words
 
         try:
-            import json, re
-            from google import genai
-            client = genai.Client(api_key=api_key)
-            prompt = f"""
+            if api_key:
+                import json, re
+                from google import genai
+                client = genai.Client(api_key=api_key)
+                prompt = f"""
 You are a bilingual Hindi-English expert.
 Convert the following list of Hindi/Devanagari/Urdu words into natural, modern conversational HINGLISH (Hindi written in Roman/Latin English letters).
 CRITICAL:
 1. Return EXACTLY the same number of words ({len(words)} words) in the exact same order.
 2. Use modern conversational Hinglish spellings (e.g. 'Yeh', 'Kya', 'Bhai', 'Slay Point', 'Matlab', 'Pagal').
-3. Return ONLY a valid JSON object matching:
+3. Keep English words (e.g. 'GAME', 'WOLVERINE', 'MISSION') unchanged in Latin script.
+4. Return ONLY a valid JSON object matching:
 {{"hinglish_words": ["word1", "word2", ...]}}
 
 Words: {json.dumps(words, ensure_ascii=False)}
 """
-            model = self.config.get("clipping", {}).get("gemini_model", "gemini-3.5-flash-lite")
-            res = client.models.generate_content(model=model, contents=prompt)
-            cleaned = res.text.strip()
-            if cleaned.startswith("```"):
-                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-                cleaned = re.sub(r"\s*```$", "", cleaned)
-            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if match:
-                data = json.loads(match.group(0))
-                hw = data.get("hinglish_words", [])
-                if len(hw) == len(words):
-                    logger.info(f"Transliterated {len(words)} subtitle words into Hinglish.")
-                    return [w.upper() for w in hw]
+                model = self.config.get("clipping", {}).get("gemini_model", "gemini-3.5-flash-lite")
+                res = client.models.generate_content(model=model, contents=prompt)
+                cleaned = res.text.strip()
+                if cleaned.startswith("```"):
+                    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                    cleaned = re.sub(r"\s*```$", "", cleaned)
+                match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+                if match:
+                    data = json.loads(match.group(0))
+                    hw = data.get("hinglish_words", [])
+                    if hw:
+                        # Normalize lengths: pad or trim to match exact word count
+                        final_hw = []
+                        for i in range(len(words)):
+                            if i < len(hw) and hw[i] and not any(0x0900 <= ord(c) <= 0x097F for c in str(hw[i])):
+                                final_hw.append(str(hw[i]).upper())
+                            else:
+                                # Fall back to phonetic transliterator for missing/deviated tokens
+                                final_hw.append(phonetic_devanagari_to_hinglish(words[i]).upper())
+                        logger.info(f"Transliterated {len(words)} subtitle words into Hinglish.")
+                        return final_hw
         except Exception as e:
-            logger.warning(f"Hinglish subtitle transliteration error: {e}")
-        return words
+            logger.warning(f"Hinglish subtitle transliteration error, using phonetic fallback: {e}")
+
+        # Fallback to local phonetic transliterator
+        return [phonetic_devanagari_to_hinglish(w).upper() for w in words]
 
     def generate_ass(self, words_list: List[Dict[str, Any]], clip_start: float, clip_end: float, output_ass_path: str) -> str:
         """
@@ -109,9 +142,13 @@ Words: {json.dumps(words, ensure_ascii=False)}
         if has_indic:
             raw_words = [w["word"] for w in clip_words]
             hinglish_words = self._transliterate_to_hinglish(raw_words)
-            if len(hinglish_words) == len(clip_words):
-                for idx, hw in enumerate(hinglish_words):
-                    clip_words[idx]["word"] = hw.upper()
+            for idx, hw in enumerate(hinglish_words[:len(clip_words)]):
+                clip_words[idx]["word"] = hw.upper()
+
+        # Final safety cleanup: ensure zero Devanagari characters remain in subtitle words
+        for w in clip_words:
+            if any(0x0900 <= ord(c) <= 0x097F for c in w["word"]):
+                w["word"] = phonetic_devanagari_to_hinglish(w["word"]).upper()
 
         # Group words into bursts of 2-4 words
         bursts = []

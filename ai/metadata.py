@@ -51,14 +51,19 @@ class MetadataGenerator:
         - Relevant keyword tags array
         """
         # Check if source or clip contains Indic/Hindi text or Indian channel handles
+        ch_lower = source_metadata.get("channel", "").lower()
+        title_lower = source_metadata.get("title", "").lower()
         is_hindi = (
             any(0x0900 <= ord(c) <= 0x097F or 0x0600 <= ord(c) <= 0x06FF for c in clip_transcript + source_metadata.get("title", ""))
-            or any(h in source_metadata.get("channel", "").lower() for h in ["slayy", "shubh", "ayush", "carry", "hindi", "bhandari"])
+            or any(h in ch_lower or h in title_lower for h in ["slayy", "shubh", "sshhuubb", "ayush", "bhandari", "carry", "techno", "mythpat", "rawknee", "gaming", "hindi"])
         )
 
         lang_rule = (
-            "4. MANDATORY HINGLISH: The video is in Hindi/Hinglish. The Title, Description, and Tags MUST be in conversational HINGLISH "
-            "(Latin alphabet / English letters, e.g. 'Slayy Point ko threat kisne diya?! 💀 #shorts'). NEVER use Devanagari (हिंदी) or Urdu script under any circumstances!"
+            "4. MANDATORY CONVERSATIONAL HINGLISH (LATIN SCRIPT):\n"
+            "   - This video is from an Indian creator / in Hindi.\n"
+            "   - The Title MUST be in punchy, modern conversational HINGLISH using the Latin/English alphabet (e.g. 'Bhai Wolverine Game Me Ye Kya Ho Gaya?! 🤯 #shorts', 'Slayy Point Ko Threat Kisne Diya?! 💀 #shorts').\n"
+            "   - STRICTLY FORBIDDEN: NEVER use Devanagari script (हिंदी) or Urdu script under any circumstances! Never write in pure formal English for Hindi moments.\n"
+            "   - Description and Tags MUST also be in conversational Hinglish and relevant gaming keywords in Latin script."
             if is_hindi else
             "4. Language: Use the native language of the video (Latin/English script)."
         )

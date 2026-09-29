@@ -105,12 +105,18 @@ class HighlightDetector:
             if not is_hindi_detected and any(0x0900 <= ord(c) <= 0x097F or 0x0600 <= ord(c) <= 0x06FF for c in text):
                 is_hindi_detected = True
 
+        channel_name = video_metadata.get("channel", "").lower()
+        title_text = video_metadata.get("title", "").lower()
+        if any(k in channel_name or k in title_text for k in ["shubh", "sshhuubb", "slayy", "ayush", "bhandari", "carry", "techno", "mythpat", "rawknee", "gaming", "hindi"]):
+            is_hindi_detected = True
+
         formatted_transcript = "\n".join(transcript_lines[:2500])
 
         language_instruction = (
-            "LANGUAGE REQUIREMENT (HINGLISH):\n"
-            "This video is in Hindi/Urdu. You MUST write all titles, hooks, and reasons in natural, modern conversational HINGLISH "
-            "(Latin alphabet / English letters, e.g. 'Bhai ne ye kya bol diya?!', NOT Devanagari or Urdu script)."
+            "LANGUAGE REQUIREMENT (MANDATORY CONVERSATIONAL HINGLISH):\n"
+            "This video is from an Indian channel / in Hindi. You MUST write all titles, hooks, and context in modern, trendy conversational HINGLISH "
+            "(Latin alphabet / English letters, e.g. 'Bhai Wolverine Game Me Ye Kya Ho Gaya?! 🤯', 'Bhai ne ye kya bol diya?! 💀'). "
+            "STRICTLY FORBIDDEN: NEVER use Devanagari script (हिंदी) or Urdu script under any circumstances! Do NOT use plain formal English for Hindi jokes."
             if is_hindi_detected else
             "LANGUAGE REQUIREMENT:\nUse the native language of the video (in Latin/English script)."
         )
@@ -131,18 +137,20 @@ CRITICAL VIRALITY & CONTEXT RULES (DO NOT VIOLATE):
 1. COMPLETE STANDALONE CONTEXT (MANDATORY):
    - A viewer scrolling YouTube Shorts has NEVER seen this 20-minute video.
    - The clip MUST make 100% complete sense on its own with ZERO outside knowledge.
-   - SETUP: The clip MUST start right when the story, topic, reaction, or meme is INTRODUCED. Never start after the setup has already happened.
-   - PUNCHLINE / RESOLUTION: The clip MUST contain the full reaction, joke, argument, or conclusion. Never cut off before the punchline or mid-thought!
-   - NO UNEXPLAINED CONTEXT: Do NOT pick moments that reference something said 5 minutes earlier unless that context is explained inside this clip.
+   - SETUP: The clip MUST start right when the story, challenge, funny discussion, or event is INTRODUCED. Never start after the setup has already happened.
+   - NO RANDOM TIMES: DO NOT pick random shouts, laughter, or ongoing fights where the viewer doesn't know who is being fought, why the creator is reacting, or what the goal is.
+   - FORBIDDEN: Starting a clip with "Like I said earlier", "So guys next up", or right in the middle of a scream without the preceding cause.
+   - PUNCHLINE / RESOLUTION: The clip MUST contain the full payoff, outcome, joke landing, or conclusion. Never cut off before the punchline or mid-sentence!
 
 2. ZERO MID-SENTENCE CUTS:
    - "start_time" MUST be the exact start of a complete sentence or new thought.
    - "end_time" MUST be the exact end of a complete sentence or natural pause.
    - Never start or end in the middle of a spoken sentence or thought.
 
-3. STRICT DURATION RULE:
-   - Clip duration (end_time - start_time) MUST be between {self.min_clip_sec} and {self.max_clip_sec} seconds.
-   - Aim for 25-45 seconds to allow enough time for Setup + Climax + Punchline.
+3. DURATION RULE:
+   - Aim for 25 to 45 seconds so there is ample time for:
+     [1] Hook/Premise Setup (5-8s) -> [2] Action/Conflict (15-25s) -> [3] Hilarious Resolution/Punchline (5-8s).
+   - Reject any moment that cannot deliver a complete narrative within {self.min_clip_sec}-{self.max_clip_sec}s.
 
 4. {language_instruction}
 
@@ -152,10 +160,12 @@ Return ONLY a raw JSON array matching this exact schema:
     "start_time": 124.5,
     "end_time": 158.2,
     "hook": "Exact opening words that grab attention",
-    "working_title": "Punchy Hinglish/English Title",
+    "working_title": "Punchy Hinglish Title",
     "viral_score": 9.5,
-    "context_summary": "Brief explanation: Setup -> Core Action -> Punchline",
-    "reason": "Why this specific 20-45s moment will achieve 100%+ retention on YouTube Shorts"
+    "setup_dialogue": "Exact first spoken line that gives the viewer the context",
+    "punchline_dialogue": "Exact last spoken line that concludes the moment",
+    "context_summary": "Clear standalone story: Setup -> Conflict -> Punchline",
+    "reason": "Why this 25-45s moment makes 100% sense to someone who has never seen the full video"
   }}
 ]
 """

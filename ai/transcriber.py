@@ -71,10 +71,13 @@ class Transcriber:
         if self._backend == "faster-whisper":
             segments, info = self._model.transcribe(
                 audio_file,
+                beam_size=1,
                 word_timestamps=True,
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=500)
             )
+            total_duration = round(getattr(info, "duration", 0), 1)
+            last_log_time = 0.0
             for seg in segments:
                 words = []
                 if seg.words:
@@ -94,6 +97,10 @@ class Transcriber:
                     "words": words
                 })
                 full_text_list.append(seg.text.strip())
+                if seg.end - last_log_time >= 60:
+                    last_log_time = seg.end
+                    pct_str = f" ({round(seg.end / total_duration * 100)}%)" if total_duration > 0 else ""
+                    logger.info(f"Transcription progress: {seg.end:.1f}s / {total_duration:.1f}s{pct_str}")
 
         elif self._backend == "openai-whisper":
             result = self._model.transcribe(audio_file, word_timestamps=True)
