@@ -122,8 +122,11 @@ class HighlightDetector:
         )
 
         prompt = f"""
-You are an elite, multi-million view YouTube Shorts producer and virality editor.
-Analyze this video transcript and identify the TOP {self.max_clips} self-contained viral clip moments.
+You are an elite Autonomous AI Video Director and viral YouTube Shorts master editor.
+Instead of mechanically slicing random moments, you must THINK on your own like a multi-million-subscriber content creator and video editor.
+
+Read this video transcript, understand the full story, creator, language, and comedy style.
+Identify the TOP {self.max_clips} VIRAL SELF-CONTAINED SHORTS.
 
 Video Title: "{video_metadata.get('title', 'Unknown')}"
 Channel: "{video_metadata.get('channel', 'Unknown')}"
@@ -133,7 +136,7 @@ TRANSCRIPT WITH TIMESTAMPS:
 {formatted_transcript}
 \"\"\"
 
-CRITICAL VIRALITY & CONTEXT RULES (DO NOT VIOLATE):
+CRITICAL DIRECTOR & VIRALITY RULES (DO NOT VIOLATE):
 1. COMPLETE STANDALONE CONTEXT (MANDATORY):
    - A viewer scrolling YouTube Shorts has NEVER seen this 20-minute video.
    - The clip MUST make 100% complete sense on its own with ZERO outside knowledge.
@@ -152,7 +155,21 @@ CRITICAL VIRALITY & CONTEXT RULES (DO NOT VIOLATE):
      [1] Hook/Premise Setup (5-8s) -> [2] Action/Conflict (15-25s) -> [3] Hilarious Resolution/Punchline (5-8s).
    - Reject any moment that cannot deliver a complete narrative within {self.min_clip_sec}-{self.max_clip_sec}s.
 
-4. {language_instruction}
+4. SOUND DESIGN & MEMES ("MEMES SOMETIMES"):
+   - "bgm_track": Choose the background music track that elevates this moment:
+     * "sneaky_comedy" (for funny, sarcastic, awkward, or goofy moments)
+     * "gaming_upbeat" (for gaming, intense action, high energy, or epic moments)
+     * "none" (if the speaker is already very loud and dramatic)
+   - "meme_sfx": Use meme sound effects SOMETIMES (only when there is an actual punchline, joke landing, fail, or shock):
+     * "vine_boom" (for sudden shock, revelation, or awkward silence)
+     * "bruh" (for epic fails, dumb choices, or facepalms)
+     * "huh" (for bizarre, confused, or unexpected moments)
+     * "ding" (for a sudden realization or genius idea)
+     * "wow" (for an impressive action or sarcastic praise)
+     * null (if this specific clip is serious or does not need a meme sound)
+   - "meme_offset_seconds": Exact relative timestamp from clip start (e.g. 18.5) where the meme SFX should hit!
+
+5. {language_instruction}
 
 Return ONLY a raw JSON array matching this exact schema:
 [
@@ -164,13 +181,17 @@ Return ONLY a raw JSON array matching this exact schema:
     "viral_score": 9.5,
     "setup_dialogue": "Exact first spoken line that gives the viewer the context",
     "punchline_dialogue": "Exact last spoken line that concludes the moment",
+    "dynamic_cuts": true,
+    "bgm_track": "sneaky_comedy",
+    "meme_sfx": "vine_boom",
+    "meme_offset_seconds": 21.4,
     "context_summary": "Clear standalone story: Setup -> Conflict -> Punchline",
     "reason": "Why this 25-45s moment makes 100% sense to someone who has never seen the full video"
   }}
 ]
 """
 
-        logger.info(f"Querying {self.provider.upper()} for viral highlight detection (Hindi/Hinglish mode: {is_hindi_detected})...")
+        logger.info(f"Querying Autonomous AI Director ({self.provider.upper()}) for viral shorts (Hindi/Hinglish mode: {is_hindi_detected})...")
         try:
             if self.provider == "gemini":
                 raw_response = self._call_gemini(prompt)
@@ -215,6 +236,13 @@ Return ONLY a raw JSON array matching this exact schema:
                 if score < self.min_retention_score:
                     continue
 
+                # Parse AI director audio & editing choices
+                bgm_choice = c.get("bgm_track", "gaming_upbeat")
+                meme_choice = c.get("meme_sfx")
+                if meme_choice in ("none", "null", ""):
+                    meme_choice = None
+                meme_offset = float(c.get("meme_offset_seconds", 0.0) or c.get("meme_offset", 0.0) or 0.0)
+
                 valid_clips.append({
                     "start_time": snapped_start,
                     "end_time": snapped_end,
@@ -222,7 +250,11 @@ Return ONLY a raw JSON array matching this exact schema:
                     "hook": c.get("hook", ""),
                     "working_title": c.get("working_title", "Viral Highlight"),
                     "viral_score": score,
-                    "reason": c.get("reason", "")
+                    "reason": c.get("reason", ""),
+                    "dynamic_cuts": c.get("dynamic_cuts", True),
+                    "bgm_track": bgm_choice,
+                    "meme_sfx": meme_choice,
+                    "meme_offset": meme_offset
                 })
             except Exception as e:
                 logger.warning(f"Error parsing candidate clip: {e}")

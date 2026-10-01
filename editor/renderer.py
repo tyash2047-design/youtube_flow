@@ -25,8 +25,45 @@ class VideoRenderer:
         self.output_dir = config.get("paths", {}).get("rendered_clips_dir", "./data/rendered")
         os.makedirs(self.output_dir, exist_ok=True)
         self.fps = config.get("video", {}).get("fps", 30)
+        self.dynamic_cuts = config.get("video", {}).get("dynamic_cuts", True)
         self.normalize_audio = config.get("video", {}).get("normalize_audio", True)
         self.subtitles_enabled = config.get("subtitles", {}).get("enabled", True)
+        
+        # Audio design config
+        self.audio_cfg = config.get("audio_design", {})
+        self.bgm_enabled = self.audio_cfg.get("bgm_enabled", True)
+        self.bgm_volume = self.audio_cfg.get("bgm_volume", 0.14)
+        self.memes_enabled = self.audio_cfg.get("memes_enabled", True)
+        self.meme_volume = self.audio_cfg.get("meme_volume", 0.85)
+
+    def _resolve_bgm_path(self, track_name: Optional[str]) -> Optional[str]:
+        """Resolves background music file path from assets/music/."""
+        if not track_name or track_name == "none":
+            return None
+        music_dir = "assets/music"
+        # Try direct match
+        for ext in [".mp3", ".wav", ".ogg"]:
+            candidate = os.path.join(music_dir, f"{track_name}{ext}")
+            if os.path.exists(candidate) and os.path.getsize(candidate) > 1000:
+                return candidate
+        # Try any available track in music_dir
+        if os.path.exists(music_dir):
+            files = [os.path.join(music_dir, f) for f in os.listdir(music_dir) if f.endswith(".mp3") and os.path.getsize(os.path.join(music_dir, f)) > 1000]
+            if files:
+                return files[0]
+        return None
+
+    def _resolve_sfx_path(self, sfx_name: Optional[str]) -> Optional[str]:
+        """Resolves meme sound effect file path from assets/sfx/."""
+        if not sfx_name or sfx_name in ("none", "null"):
+            return None
+        sfx_dir = "assets/sfx"
+        clean = sfx_name.lower().replace("-", "_").replace(" ", "_")
+        for ext in [".mp3", ".wav"]:
+            candidate = os.path.join(sfx_dir, f"{clean}{ext}")
+            if os.path.exists(candidate) and os.path.getsize(candidate) > 1000:
+                return candidate
+        return None
 
     def render_short(
         self,
@@ -36,11 +73,14 @@ class VideoRenderer:
         output_filename: Optional[str] = None
     ) -> Optional[str]:
         """
-        Renders a 9:16 vertical YouTube Short from a source video with:
+        Renders an Autonomous Director 9:16 vertical YouTube Short with:
         - Exact start/end trimming (15-50s)
-        - 9:16 vertical re-framing (cinematic blur or center crop)
-        - Word-by-word animated subtitles burned in
-        - Audio loudness normalization
+        - 9:16 vertical re-framing (cinematic blur)
+        - Dynamic camera cuts / punch zooms (alternating 1.0x and 1.18x every 4s)
+        - Word-by-word animated subtitles burned in (Hinglish/English)
+        - AI-selected background music ducked at -22dB with outro fade
+        - AI-timed meme sound effects (vine boom, bruh, etc.) on punchlines
+        - EBU R128 loudness normalization
         """
         start_time = clip_info["start_time"]
         end_time = clip_info["end_time"]
@@ -63,32 +103,81 @@ class VideoRenderer:
             except Exception as e:
                 logger.warning(f"Failed to generate ASS subtitles: {e}")
 
-        # 2. Build FFmpeg Filtergraph
-        # First part: Cropping to 9:16
+        # 2. Build Video Filtergraph
         crop_filter = self.cropper.get_filter_complex()
         
-        # If subtitles enabled, chain the ASS filter
+        # Determine dynamic camera cuts
+        use_cuts = clip_info.get("dynamic_cuts", self.dynamic_cuts)
+        if use_cuts:
+            # Alternates between 1.0x wide (1080x1920) and 1.18x punch zoom (915x1627) every 4 seconds
+            v_chain = f"{crop_filter};[v_cropped]crop=w='if(mod(floor(t/4),2), 915, 1080)':h='if(mod(floor(t/4),2), 1627, 1920)':x='(1080-out_w)/2':y='(1920-out_h)/2',scale=1080:1920[v_cuts]"
+            v_target = "[v_cuts]"
+        else:
+            v_chain = crop_filter
+            v_target = "[v_cropped]"
+
         if has_subtitles:
             escaped_ass = escape_ffmpeg_filter_path(ass_path)
-            # Chain subtitle burn to [v_cropped] output
-            full_filter = f"{crop_filter};[v_cropped]ass='{escaped_ass}'[v_out]"
+            full_v_filter = f"{v_chain};{v_target}ass='{escaped_ass}'[v_out]"
             v_map = "[v_out]"
         else:
-            full_filter = crop_filter
-            v_map = "[v_cropped]"
+            full_v_filter = v_chain
+            v_map = v_target
 
-        # Audio filter
-        audio_filter = "loudnorm=I=-14:LRA=11:TP=-1.5" if self.normalize_audio else "anull"
+        # 3. Build Audio Filtergraph with BGM and Meme SFX
+        cmd_inputs = [
+            "-ss", f"{start_time:.2f}",
+            "-to", f"{end_time:.2f}",
+            "-i", source_video_path
+        ]
+        
+        next_input_idx = 1
+        a_mix_labels = ["[0:a]"]
+        a_filter_parts = []
+
+        # Background Music (BGM)
+        bgm_track = clip_info.get("bgm_track") or ("sneaky_comedy" if "laugh" in str(clip_info).lower() or "joke" in str(clip_info).lower() else "gaming_upbeat")
+        bgm_path = self._resolve_bgm_path(bgm_track) if self.bgm_enabled else None
+        if bgm_path:
+            cmd_inputs.extend(["-stream_loop", "-1", "-i", bgm_path])
+            a_filter_parts.append(f"[{next_input_idx}:a]volume={self.bgm_volume},afade=t=out:st={max(0.0, duration-1.5):.2f}:d=1.5[a_bgm]")
+            a_mix_labels.append("[a_bgm]")
+            next_input_idx += 1
+            logger.info(f"Adding Background Music: [cyan]{os.path.basename(bgm_path)}[/cyan] (vol: {self.bgm_volume})")
+
+        # Meme SFX
+        meme_sfx = clip_info.get("meme_sfx")
+        meme_offset = float(clip_info.get("meme_offset", 0.0) or clip_info.get("meme_offset_seconds", 0.0) or 0.0)
+        meme_path = self._resolve_sfx_path(meme_sfx) if (self.memes_enabled and meme_sfx) else None
+        if meme_path and meme_offset > 0.0 and meme_offset < duration:
+            cmd_inputs.extend(["-i", meme_path])
+            delay_ms = int(meme_offset * 1000)
+            a_filter_parts.append(f"[{next_input_idx}:a]adelay={delay_ms}|{delay_ms},volume={self.meme_volume}[a_meme]")
+            a_mix_labels.append("[a_meme]")
+            next_input_idx += 1
+            logger.info(f"Adding Meme SFX: [yellow]{os.path.basename(meme_path)}[/yellow] at {meme_offset:.2f}s")
+
+        # Assemble audio mix
+        if len(a_mix_labels) > 1:
+            mix_inputs_str = "".join(a_mix_labels)
+            amix_filter = f"{mix_inputs_str}amix=inputs={len(a_mix_labels)}:duration=first:dropout_transition=2"
+            if self.normalize_audio:
+                amix_filter += ",loudnorm=I=-14:LRA=11:TP=-1.5"
+            a_filter_parts.append(f"{amix_filter}[a_out]")
+            audio_graph = ";".join(a_filter_parts)
+            a_map = "[a_out]"
+        else:
+            audio_graph = "[0:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]" if self.normalize_audio else "[0:a]anull[a_out]"
+            a_map = "[a_out]"
+
+        full_filter_complex = f"{full_v_filter};{audio_graph}"
 
         cmd = [
             "ffmpeg", "-y",
-            "-ss", f"{start_time:.2f}",
-            "-to", f"{end_time:.2f}",
-            "-i", source_video_path,
-            "-filter_complex", full_filter,
+            *cmd_inputs,
+            "-filter_complex", full_filter_complex,
             "-map", v_map,
-            "-map", "0:a?",
-            "-af", audio_filter,
+            "-map", a_map,
             "-r", str(self.fps),
             "-c:v", "libx264",
             "-preset", "fast",
@@ -97,6 +186,7 @@ class VideoRenderer:
             "-c:a", "aac",
             "-ar", "44100",
             "-b:a", "192k",
+            "-t", f"{duration:.2f}",
             "-movflags", "+faststart",
             final_output_path
         ]

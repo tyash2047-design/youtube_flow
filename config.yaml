@@ -54,13 +54,21 @@ video:
   fps: 30
   
   # Framing mode for 16:9 landscape to 9:16 vertical:
-  # - 'cinematic_blur': Original 16:9 centered with heavily blurred 9:16 background (best for podcasts/interviews)
+  # - 'cinematic_blur': Original 16:9 centered with heavily blurred 9:16 background
   # - 'center_crop': Scale and crop the middle 9:16 portion
   framing_mode: "cinematic_blur"
   blur_intensity: 25
+  dynamic_cuts: true             # AI camera cuts: alternates 1.0x wide and 1.18x punch zoom every 4s to kill stillness
   
   # Normalize audio loudness to standard YouTube -14 LUFS
   normalize_audio: true
+
+# 3b. AI SOUND DESIGN (BGM & MEME SFX)
+audio_design:
+  bgm_enabled: true              # Layer AI-selected background music under speech
+  bgm_volume: 0.14               # Ducked volume (14%) so dialogue remains crisp and loud
+  memes_enabled: true            # Trigger iconic meme SFX (vine boom, bruh, etc.) at key punchlines
+  meme_volume: 0.85              # Punchy sound effect volume
 
 # 4. TRENDY DYNAMIC SUBTITLES (Alex Hormozi Style)
 subtitles:
