@@ -72,9 +72,22 @@ class Database:
                 );
             """)
 
+            # Autonomous AI Thoughts & Editorial Reasoning table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_thoughts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    thought_type TEXT NOT NULL,
+                    title TEXT,
+                    reasoning_text TEXT NOT NULL,
+                    metadata_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             # Indexes for fast lookup
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sources_vid ON sources(video_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_clips_status ON clips(status);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_thoughts_type ON ai_thoughts(thought_type);")
             
             # Reset any failed sources from previous bot blocks so they can be re-attempted
             cursor.execute("UPDATE sources SET status = 'DISCOVERED' WHERE status = 'FAILED';")
@@ -268,6 +281,29 @@ class Database:
                 SELECT id, title, viral_score, youtube_url, uploaded_at
                 FROM clips
                 WHERE status = 'UPLOADED' AND youtube_url IS NOT NULL
+                ORDER BY id DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def log_ai_thought(self, thought_type: str, title: str, reasoning_text: str, metadata_json: Optional[str] = None) -> int:
+        """Stores autonomous AI Director and Content Strategist reasoning in the database."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO ai_thoughts (thought_type, title, reasoning_text, metadata_json)
+                VALUES (?, ?, ?, ?)
+            """, (thought_type, title, reasoning_text, metadata_json))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_recent_ai_thoughts(self, limit: int = 8) -> List[Dict[str, Any]]:
+        """Returns the most recent reasoning traces and strategy thoughts from the AI Brain."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, thought_type, title, reasoning_text, metadata_json, created_at
+                FROM ai_thoughts
                 ORDER BY id DESC
                 LIMIT ?
             """, (limit,))

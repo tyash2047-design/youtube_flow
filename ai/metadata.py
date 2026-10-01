@@ -22,16 +22,25 @@ class MetadataGenerator:
     def _call_llm(self, prompt: str) -> str:
         if self.provider == "gemini":
             api_key = os.getenv("GEMINI_API_KEY")
+            models_to_try = [self.gemini_model, "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.6-flash"]
+            last_err = None
+            for m in models_to_try:
+                try:
+                    from google import genai
+                    client = genai.Client(api_key=api_key)
+                    res = client.models.generate_content(model=m, contents=prompt)
+                    if res and res.text:
+                        return res.text
+                except Exception as e:
+                    last_err = e
+                    continue
             try:
-                from google import genai
-                client = genai.Client(api_key=api_key)
-                res = client.models.generate_content(model=self.gemini_model, contents=prompt)
-                return res.text
-            except ImportError:
                 import google.generativeai as genai_legacy
                 genai_legacy.configure(api_key=api_key)
-                m = genai_legacy.GenerativeModel(self.gemini_model)
+                m = genai_legacy.GenerativeModel("gemini-1.5-flash")
                 return m.generate_content(prompt).text
+            except Exception:
+                raise last_err or RuntimeError("All Gemini models failed.")
         else:
             api_key = os.getenv("OPENAI_API_KEY")
             from openai import OpenAI
@@ -49,6 +58,7 @@ class MetadataGenerator:
         - Catchy Title (< 60 chars) with high curiosity gap
         - Description with #shorts and viral tags
         - Relevant keyword tags array
+        - Pinned comment for comment section debate
         """
         # Check if source or clip contains Indic/Hindi text or Indian channel handles
         ch_lower = source_metadata.get("channel", "").lower()
@@ -63,7 +73,7 @@ class MetadataGenerator:
             "   - This video is from an Indian creator / in Hindi.\n"
             "   - The Title MUST be in punchy, modern conversational HINGLISH using the Latin/English alphabet (e.g. 'Bhai Wolverine Game Me Ye Kya Ho Gaya?! 🤯 #shorts', 'Slayy Point Ko Threat Kisne Diya?! 💀 #shorts').\n"
             "   - STRICTLY FORBIDDEN: NEVER use Devanagari script (हिंदी) or Urdu script under any circumstances! Never write in pure formal English for Hindi moments.\n"
-            "   - Description and Tags MUST also be in conversational Hinglish and relevant gaming keywords in Latin script."
+            "   - Description, Tags, and Pinned Comment MUST also be in conversational Hinglish and relevant gaming keywords in Latin script."
             if is_hindi else
             "4. Language: Use the native language of the video (Latin/English script)."
         )
@@ -82,13 +92,15 @@ REQUIREMENTS:
 1. Title: Under 60 characters total. Must trigger intense curiosity or emotion. Include 1 relevant emoji. Do NOT use generic titles like 'Interesting Moment'. Make it feel urgent or shocking.
 2. Description: 2-3 engaging sentences summarizing the clip, a question to drive comments, and 4-6 hashtags (MUST include #shorts, #viral, #trending).
 3. Tags: 8-12 concise, highly searched keyword tags.
+4. Pinned Comment: A witty or provocative 1-2 sentence question to pin in the comments that makes viewers instantly comment.
 {lang_rule}
 
 Respond ONLY with valid JSON:
 {{
   "title": "Viral Hook Title 🤯 #shorts",
   "description": "Engaging description text... \\n\\n#shorts #viral #trending #podcast",
-  "tags": ["shorts", "viral", "keyword1", "keyword2"]
+  "tags": ["shorts", "viral", "keyword1", "keyword2"],
+  "pinned_comment": "Aapke saath kabhi aisa hua hai? 😂 Comments me batao!"
 }}
 """
         logger.info("Generating SEO-optimized viral metadata via LLM...")
@@ -118,6 +130,14 @@ Respond ONLY with valid JSON:
                 description += credit_text
 
             tags = list(set(data.get("tags", []) + self.default_tags))[:15]
+            pinned_comment = data.get("pinned_comment", "Aapke saath kabhi aisa hua hai? 😂 Comments me batao!" if is_hindi else "Would you have done this? 😂 Drop your thoughts below!")
+
+            return {
+                "title": title,
+                "description": description,
+                "tags": tags,
+                "pinned_comment": pinned_comment
+            }
 
             return {
                 "title": title[:100],

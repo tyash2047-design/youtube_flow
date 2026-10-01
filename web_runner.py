@@ -378,6 +378,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- Autonomous AI Director's Mind -->
+        <div class="card" style="border: 1px solid rgba(139, 92, 246, 0.3); background: rgba(18, 20, 29, 0.85); box-shadow: 0 0 25px rgba(139, 92, 246, 0.12);">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">🧠</span> 
+                    <span>Autonomous AI Creative Director's Live Mind</span>
+                </div>
+                <div style="font-size: 11px; padding: 4px 10px; border-radius: 20px; background: rgba(139, 92, 246, 0.2); color: #c084fc; font-weight: 600; border: 1px solid rgba(139, 92, 246, 0.4);">
+                    THINKING ENGINE: ACTIVE
+                </div>
+            </div>
+            <div id="ai-thoughts-container" style="display: flex; flex-direction: column; gap: 12px; margin-top: 14px;">
+                <div style="color: var(--text-muted); font-size: 13px; font-style: italic;">
+                    AI Director is currently observing trends and reasoning about video narratives...
+                </div>
+            </div>
+        </div>
+
         <!-- Target Channels -->
         <div class="card">
             <div class="card-header">
@@ -510,10 +528,43 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
 
+        async function fetchAIThoughts() {
+            try {
+                const res = await fetch('/api/ai_thoughts');
+                if (!res.ok) return;
+                const data = await res.json();
+                const container = document.getElementById('ai-thoughts-container');
+                if (data.thoughts && data.thoughts.length > 0) {
+                    container.innerHTML = data.thoughts.map(t => {
+                        const isStrat = t.thought_type === 'CONTENT_STRATEGY';
+                        const badgeColor = isStrat ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255, 0, 85, 0.15)';
+                        const badgeBorder = isStrat ? 'rgba(6, 182, 212, 0.4)' : 'rgba(255, 0, 85, 0.4)';
+                        const badgeText = isStrat ? '#38bdf8' : '#fb7185';
+                        const typeLabel = isStrat ? 'VIRAL CONTENT STRATEGY' : 'DIRECTOR REASONING';
+                        
+                        return `
+                            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; padding: 14px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <div style="font-weight: 700; font-size: 13px; color: #f8fafc;">${escapeHtml(t.title || 'AI Reasoning')}</div>
+                                    <span style="font-size: 10px; padding: 2px 8px; border-radius: 12px; background: ${badgeColor}; border: 1px solid ${badgeBorder}; color: ${badgeText}; font-weight: 700; letter-spacing: 0.5px;">${typeLabel}</span>
+                                </div>
+                                <div style="font-size: 12px; color: #cbd5e1; line-height: 1.5; white-space: pre-wrap; font-family: 'JetBrains Mono', monospace;">${escapeHtml(t.reasoning_text || '')}</div>
+                                <div style="font-size: 10px; color: var(--text-muted); margin-top: 8px; text-align: right;">${t.created_at ? new Date(t.created_at).toLocaleTimeString() : 'Recent'}</div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (err) {
+                console.error("AI thoughts error:", err);
+            }
+        }
+
         fetchStats();
         fetchLogs();
+        fetchAIThoughts();
         setInterval(fetchStats, 5000);
         setInterval(fetchLogs, 4000);
+        setInterval(fetchAIThoughts, 5000);
     </script>
 </body>
 </html>
@@ -523,6 +574,20 @@ class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+
+        # 0. API: AI Thoughts endpoint
+        if path == "/api/ai_thoughts":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            try:
+                db = get_db()
+                thoughts = db.get_recent_ai_thoughts(limit=8)
+                self.wfile.write(json.dumps({"thoughts": thoughts}).encode("utf-8"))
+            except Exception as e:
+                self.wfile.write(json.dumps({"error": str(e), "thoughts": []}).encode("utf-8"))
+            return
 
         # 1. API: Stats endpoint
         if path == "/api/stats":

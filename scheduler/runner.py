@@ -12,6 +12,7 @@ from downloader.scraper import ContentScraper
 from ai.transcriber import Transcriber
 from ai.highlighter import HighlightDetector
 from ai.metadata import MetadataGenerator
+from ai.brain import AIBrain
 from editor.renderer import VideoRenderer
 from uploader.youtube_uploader import YouTubeShortsUploader
 from utils.logger import logger
@@ -22,13 +23,14 @@ class PipelineRunner:
         self.db = Database(config.get("paths", {}).get("database_file", "./data/pipeline.db"))
         self.scraper = ContentScraper(config, self.db)
         
-        # AI components
+        # Autonomous AI components
         clip_cfg = config.get("clipping", {})
+        self.ai_brain = AIBrain(config, self.db)
         self.transcriber = Transcriber(
             model_size=clip_cfg.get("whisper_model_size", "small"),
             device=clip_cfg.get("whisper_device", "auto")
         )
-        self.highlighter = HighlightDetector(config)
+        self.highlighter = HighlightDetector(config, self.db)
         self.metadata_gen = MetadataGenerator(config)
         
         # Editor & Uploader
@@ -91,6 +93,7 @@ class PipelineRunner:
 
                 # 4. Generate Metadata
                 meta = self.metadata_gen.generate_metadata(clip, video_info, clip_text)
+                clip["pinned_comment"] = meta.get("pinned_comment")
                 
                 # Add to DB
                 clip_id = self.db.add_clip(
@@ -147,7 +150,22 @@ class PipelineRunner:
         max_to_process = self.config.get("sources", {}).get("max_videos_per_scrape", 2)
         candidates = []
 
-        # 1. Check Channels (Round-robin: collect top 2 new candidates per channel so one blocked channel doesn't stop the pipeline)
+        # 1. Autonomous AI Strategic Discovery (AI thinks on its own about viral angles)
+        try:
+            ai_strategies = self.ai_brain.think_content_strategy()
+            for strat in ai_strategies:
+                query = strat.get("search_query")
+                if query:
+                    logger.info(f"🧠 Hunting with AI-brainstormed angle: '{query}' ({strat.get('creative_angle')})")
+                    ai_vids = self.scraper.search_candidates_by_keywords(query, max_results=2)
+                    if ai_vids:
+                        candidates.extend(ai_vids)
+                    if len(candidates) >= max_to_process * 2:
+                        break
+        except Exception as e:
+            logger.warning(f"AI strategic discovery fallback: {e}")
+
+        # 2. Check Channels (Round-robin: collect top 2 new candidates per channel so one blocked channel doesn't stop the pipeline)
         for channel in self.config.get("sources", {}).get("channels", []):
             try:
                 new_vids = self.scraper.fetch_candidates_from_channel(channel)
@@ -156,11 +174,11 @@ class PipelineRunner:
             except Exception as e:
                 logger.error(f"Error checking channel {channel}: {e}")
 
-        # 2. Check Keywords if need more candidates
+        # 3. Check Static Keywords if need more candidates
         if len(candidates) < max_to_process:
             for kw in self.config.get("sources", {}).get("keywords", []):
                 try:
-                    new_vids = self.scraper.search_candidates_by_keywords(kw, max_results=3)
+                    new_vids = self.scraper.search_candidates_by_keywords(kw, max_results=2)
                     candidates.extend(new_vids)
                     if len(candidates) >= max_to_process * 2:
                         break

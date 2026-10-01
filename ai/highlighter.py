@@ -8,16 +8,17 @@ from utils.logger import logger
 load_dotenv()
 
 class HighlightDetector:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], db=None):
         load_dotenv()
         self.config = config
+        self.db = db
         self.clip_cfg = config.get("clipping", {})
         self.min_clip_sec = self.clip_cfg.get("min_clip_seconds", 15)
         self.max_clip_sec = self.clip_cfg.get("max_clip_seconds", 50)
         self.max_clips = self.clip_cfg.get("max_clips_per_source", 3)
         self.min_retention_score = self.clip_cfg.get("min_retention_score", 7.5)
         self.provider = self.clip_cfg.get("llm_provider", "gemini").lower()
-        self.gemini_model = self.clip_cfg.get("gemini_model", "gemini-3.6-flash")
+        self.gemini_model = self.clip_cfg.get("gemini_model", "gemini-3.5-flash-lite")
         self.openai_model = self.clip_cfg.get("openai_model", "gpt-4o-mini")
 
     def _call_gemini(self, prompt: str) -> str:
@@ -25,27 +26,30 @@ class HighlightDetector:
         if not api_key:
             raise ValueError("GEMINI_API_KEY not found in environment variables. Please add it to your .env file.")
 
-        # Try official modern google-genai SDK first
-        try:
-            from google import genai
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=self.gemini_model,
-                contents=prompt
-            )
-            return response.text
-        except ImportError:
-            pass
+        models_to_try = [self.gemini_model, "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.6-flash"]
+        last_err = None
+        for m in models_to_try:
+            try:
+                from google import genai
+                client = genai.Client(api_key=api_key)
+                response = client.models.generate_content(
+                    model=m,
+                    contents=prompt
+                )
+                if response and response.text:
+                    return response.text
+            except Exception as e:
+                last_err = e
+                continue
 
-        # Try google.generativeai legacy package
         try:
             import google.generativeai as genai_legacy
             genai_legacy.configure(api_key=api_key)
-            model = genai_legacy.GenerativeModel(self.gemini_model)
+            model = genai_legacy.GenerativeModel("gemini-1.5-flash")
             response = model.generate_content(prompt)
             return response.text
-        except ImportError:
-            raise RuntimeError("Please install google-genai by running: pip install google-genai")
+        except Exception:
+            raise last_err or RuntimeError("All Gemini models failed.")
 
     def _call_openai(self, prompt: str) -> str:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -174,6 +178,11 @@ CRITICAL DIRECTOR & VIRALITY RULES (DO NOT VIOLATE):
 Return ONLY a raw JSON array matching this exact schema:
 [
   {{
+    "director_thoughts": {{
+      "story_arc": "Setup -> Escalation -> Punchline narrative breakdown",
+      "cold_viewer_test": "Why a stranger who has never seen this channel will 100% understand this clip in 3 seconds",
+      "pacing_and_audio": "Why dynamic cuts and this specific BGM/meme SFX elevate the retention"
+    }},
     "start_time": 124.5,
     "end_time": 158.2,
     "hook": "Exact opening words that grab attention",
@@ -185,7 +194,6 @@ Return ONLY a raw JSON array matching this exact schema:
     "bgm_track": "sneaky_comedy",
     "meme_sfx": "vine_boom",
     "meme_offset_seconds": 21.4,
-    "context_summary": "Clear standalone story: Setup -> Conflict -> Punchline",
     "reason": "Why this 25-45s moment makes 100% sense to someone who has never seen the full video"
   }}
 ]
@@ -243,6 +251,28 @@ Return ONLY a raw JSON array matching this exact schema:
                     meme_choice = None
                 meme_offset = float(c.get("meme_offset_seconds", 0.0) or c.get("meme_offset", 0.0) or 0.0)
 
+                director_thoughts = c.get("director_thoughts", {})
+                thought_summary = (
+                    f"Story: {director_thoughts.get('story_arc', '')}\n"
+                    f"Cold Test: {director_thoughts.get('cold_viewer_test', '')}\n"
+                    f"Pacing: {director_thoughts.get('pacing_and_audio', '')}"
+                ) if director_thoughts else c.get("reason", "")
+
+                # Record reasoning in Database for live web dashboard
+                if self.db and hasattr(self.db, "log_ai_thought"):
+                    self.db.log_ai_thought(
+                        thought_type="DIRECTOR_DECISION",
+                        title=f"Director Vision: {c.get('working_title', 'Viral Short')}",
+                        reasoning_text=thought_summary,
+                        metadata_json=json.dumps({
+                            "start": snapped_start,
+                            "end": snapped_end,
+                            "score": score,
+                            "bgm": bgm_choice,
+                            "meme": meme_choice
+                        })
+                    )
+
                 valid_clips.append({
                     "start_time": snapped_start,
                     "end_time": snapped_end,
@@ -251,6 +281,7 @@ Return ONLY a raw JSON array matching this exact schema:
                     "working_title": c.get("working_title", "Viral Highlight"),
                     "viral_score": score,
                     "reason": c.get("reason", ""),
+                    "director_thoughts": director_thoughts,
                     "dynamic_cuts": c.get("dynamic_cuts", True),
                     "bgm_track": bgm_choice,
                     "meme_sfx": meme_choice,

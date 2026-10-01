@@ -136,9 +136,32 @@ class YouTubeShortsUploader:
         # Record in database
         self.db.update_clip_uploaded(clip_id, video_id, shorts_url)
 
+        # Post AI engagement comment if available
+        pinned_comment = clip.get("pinned_comment")
+        if pinned_comment:
+            self._post_pinned_comment(service, video_id, pinned_comment)
+
         return {
             "clip_id": clip_id,
             "youtube_id": video_id,
             "url": shorts_url,
             "title": title
         }
+
+    def _post_pinned_comment(self, service, video_id: str, text: str):
+        """Attempts to post an engagement-driving comment to the uploaded Short."""
+        try:
+            body = {
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {
+                        "snippet": {
+                            "textOriginal": text
+                        }
+                    }
+                }
+            }
+            service.commentThreads().insert(part="snippet", body=body).execute()
+            logger.info(f"Posted AI engagement comment to Short {video_id}: [italic yellow]'{text}'[/italic yellow]")
+        except Exception as e:
+            logger.debug(f"Could not post comment to Short (non-critical): {e}")
