@@ -46,9 +46,16 @@ class YouTubeShortsUploader:
         # 2. Authenticate
         service = self.auth.get_service(allow_browser=False)
         if not service:
-            err_msg = "YouTube authentication service unavailable. Run 'python main.py auth' to set up tokens."
+            err_msg = "YouTube authentication service unavailable (OAuth token expired or revoked). Run 'python main.py auth' to refresh tokens."
             logger.error(err_msg)
-            self.db.update_clip_failed(clip_id, err_msg)
+            # Do NOT mark as FAILED because the clip is already rendered! Leave it in RENDERED queue.
+            if hasattr(self.db, "log_ai_thought"):
+                self.db.log_ai_thought(
+                    thought_type="AUTH_REQUIRED",
+                    title="YouTube OAuth Token Expired",
+                    reasoning_text="The 7-day Google Cloud OAuth test token expired (invalid_grant). Video is rendered and safely queued. Run 'python main.py auth' to re-authenticate.",
+                    metadata_json=json.dumps({"clip_id": clip_id, "rendered_path": video_path})
+                )
             return None
 
         # 3. Parse Metadata

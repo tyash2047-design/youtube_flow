@@ -29,7 +29,7 @@ class PipelineRunner:
         self.ai_brain = AIBrain(config, self.db)
         self.healer = AIAutoHealer(config, self.db, self.ai_brain)
         self.transcriber = Transcriber(
-            model_size=clip_cfg.get("whisper_model_size", "small"),
+            model_size=clip_cfg.get("whisper_model_size", "base"),
             device=clip_cfg.get("whisper_device", "auto")
         )
         self.highlighter = HighlightDetector(config, self.db)

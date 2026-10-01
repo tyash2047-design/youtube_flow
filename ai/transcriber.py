@@ -1,12 +1,14 @@
 import os
+import json
 from typing import List, Dict, Any, Optional
 from utils.logger import logger
 
 class Transcriber:
-    def __init__(self, model_size: str = "small", device: str = "auto"):
+    def __init__(self, model_size: str = "base", device: str = "auto"):
         self.model_size = model_size
         self.device = device
         self._model = None
+        self._batched_pipeline = None
 
     def _load_model(self):
         if self._model is not None:
@@ -14,7 +16,7 @@ class Transcriber:
 
         # Attempt to load faster-whisper first (much faster on CPU and CUDA)
         try:
-            from faster_whisper import WhisperModel
+            from faster_whisper import WhisperModel, BatchedInferencePipeline
             import ctranslate2
             cuda_count = 0
             try:
@@ -23,8 +25,13 @@ class Transcriber:
                 pass
             dev = "cuda" if (self.device == "cuda" or (self.device == "auto" and cuda_count > 0)) else "cpu"
             compute_type = "float16" if dev == "cuda" else "int8"
-            logger.info(f"Loading faster-whisper ({self.model_size}) on [cyan]{dev}[/cyan] ({compute_type})...")
-            self._model = WhisperModel(self.model_size, device=dev, compute_type=compute_type)
+            threads = min(12, os.cpu_count() or 4) if dev == "cpu" else 4
+            logger.info(f"Loading faster-whisper ({self.model_size}) on [cyan]{dev}[/cyan] ({compute_type}, {threads} threads)...")
+            self._model = WhisperModel(self.model_size, device=dev, compute_type=compute_type, cpu_threads=threads)
+            try:
+                self._batched_pipeline = BatchedInferencePipeline(model=self._model)
+            except Exception:
+                self._batched_pipeline = None
             self._backend = "faster-whisper"
             return
         except Exception as e:
@@ -57,25 +64,46 @@ class Transcriber:
     def transcribe(self, audio_file: str) -> Dict[str, Any]:
         """
         Transcribes audio with word-level timestamps.
+        Checks for cached transcript first for instant recovery.
         Returns a standardized dictionary with segments and word timings.
         """
-        self._load_model()
-        logger.info(f"Starting word-level transcription for: {audio_file}")
-
         if not os.path.exists(audio_file):
             raise FileNotFoundError(f"Audio file not found: {audio_file}")
+
+        # Instant cache check
+        cache_file = f"{audio_file}.transcript.json"
+        if os.path.exists(cache_file) and os.path.getsize(cache_file) > 10:
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                if cached.get("segments"):
+                    logger.info(f"Loaded cached transcript with {len(cached['segments'])} segments: {cache_file}")
+                    return cached
+            except Exception as e:
+                logger.warning(f"Could not read cached transcript {cache_file}: {e}")
+
+        self._load_model()
+        logger.info(f"Starting word-level transcription for: {audio_file}")
 
         segments_data = []
         full_text_list = []
 
         if self._backend == "faster-whisper":
-            segments, info = self._model.transcribe(
-                audio_file,
-                beam_size=1,
-                word_timestamps=True,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500)
-            )
+            if getattr(self, "_batched_pipeline", None) is not None:
+                segments, info = self._batched_pipeline.transcribe(
+                    audio_file,
+                    batch_size=8,
+                    word_timestamps=True
+                )
+            else:
+                segments, info = self._model.transcribe(
+                    audio_file,
+                    beam_size=1,
+                    word_timestamps=True,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
+
             total_duration = round(getattr(info, "duration", 0), 1)
             last_log_time = 0.0
             for seg in segments:
@@ -124,7 +152,18 @@ class Transcriber:
                 full_text_list.append(seg.get("text", "").strip())
 
         logger.info(f"Transcription complete: extracted {len(segments_data)} segments.")
-        return {
+        result = {
             "full_text": " ".join(full_text_list),
             "segments": segments_data
         }
+
+        # Save to disk cache for instant reuse
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False)
+            logger.info(f"Cached transcript saved to: {cache_file}")
+        except Exception as e:
+            logger.warning(f"Could not save transcript cache {cache_file}: {e}")
+
+        return result
+
