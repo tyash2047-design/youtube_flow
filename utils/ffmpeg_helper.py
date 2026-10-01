@@ -123,3 +123,10 @@ def get_media_duration(file_path: str) -> float:
     except Exception as e:
         logger.warning(f"Could not read duration for {file_path}: {e}")
     return 0.0
+
+def escape_ffmpeg_filter_path(path: str) -> str:
+    """Escapes file paths for FFmpeg filter arguments on Windows and POSIX."""
+    clean = path.replace("\\", "/")
+    clean = clean.replace(":", r"\:")
+    clean = clean.replace("'", r"\'")
+    return clean

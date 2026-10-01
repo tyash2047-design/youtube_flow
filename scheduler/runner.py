@@ -13,6 +13,7 @@ from ai.transcriber import Transcriber
 from ai.highlighter import HighlightDetector
 from ai.metadata import MetadataGenerator
 from ai.brain import AIBrain
+from ai.healer import AIAutoHealer
 from editor.renderer import VideoRenderer
 from uploader.youtube_uploader import YouTubeShortsUploader
 from utils.logger import logger
@@ -26,6 +27,7 @@ class PipelineRunner:
         # Autonomous AI components
         clip_cfg = config.get("clipping", {})
         self.ai_brain = AIBrain(config, self.db)
+        self.healer = AIAutoHealer(config, self.db, self.ai_brain)
         self.transcriber = Transcriber(
             model_size=clip_cfg.get("whisper_model_size", "small"),
             device=clip_cfg.get("whisper_device", "auto")
@@ -33,8 +35,8 @@ class PipelineRunner:
         self.highlighter = HighlightDetector(config, self.db)
         self.metadata_gen = MetadataGenerator(config)
         
-        # Editor & Uploader
-        self.renderer = VideoRenderer(config)
+        # Editor & Uploader with Auto-Healing
+        self.renderer = VideoRenderer(config, self.db)
         self.uploader = YouTubeShortsUploader(config, self.db)
         
         # Settings
@@ -54,21 +56,33 @@ class PipelineRunner:
         vid_id = video_info["video_id"]
         logger.info(f"--- Processing Source: [bold yellow]{video_info.get('title')}[/bold yellow] ({vid_id}) ---")
 
-        # 1. Download
+        # 1. Download with Auto-Healer
         dl_result = self.scraper.download_video_and_audio(video_info)
         if not dl_result:
+            logger.warning(f"Download failed for {vid_id}. Triggering Autonomous AI Download Healer...")
+            replacements = self.healer.heal_download_block(video_info, self.scraper)
+            if replacements:
+                logger.info(f"🛠️ Autonomous Healer discovered {len(replacements)} replacement sources. Auto-processing replacement...")
+                for rep in replacements:
+                    if not self.db.is_source_processed(rep["video_id"]):
+                        count = self.process_single_source(rep)
+                        if count and count > 0:
+                            return count
             return 0
 
         source_video = dl_result["video_path"]
         audio_path = dl_result["audio_path"]
 
         try:
-            # 2. Transcribe
+            # 2. Transcribe with Audio Auto-Healer
             transcript = self.transcriber.transcribe(audio_path)
             if not transcript or not transcript.get("segments"):
-                logger.warning(f"No speech or transcript found for {vid_id}")
-                self.db.update_source_status(vid_id, "NO_TRANSCRIPT")
-                return 0
+                logger.warning(f"Initial transcription yielded no speech for {vid_id}. Triggering Audio Vocal Enhancement Healer...")
+                transcript = self.healer.heal_audio_for_transcription(audio_path, self.transcriber)
+                if not transcript or not transcript.get("segments"):
+                    logger.warning(f"Audio for {vid_id} remains non-verbal after healing.")
+                    self.db.update_source_status(vid_id, "NO_SPEECH")
+                    return 0
 
             # Collect all words across segments for accurate subtitle timing
             all_words = []

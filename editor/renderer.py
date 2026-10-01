@@ -6,6 +6,7 @@ from utils.logger import logger
 from utils.ffmpeg_helper import run_ffmpeg_cmd, get_ffmpeg_path
 from .cropper import VideoCropper
 from .subtitles import SubtitleGenerator
+from ai.healer import AIAutoHealer
 
 def escape_ffmpeg_filter_path(path: str) -> str:
     """Escapes file paths for FFmpeg filter arguments on Windows and POSIX."""
@@ -18,8 +19,10 @@ def escape_ffmpeg_filter_path(path: str) -> str:
     return clean
 
 class VideoRenderer:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], db=None):
         self.config = config
+        self.db = db
+        self.healer = AIAutoHealer(config, db)
         self.cropper = VideoCropper(config)
         self.subtitle_gen = SubtitleGenerator(config)
         self.output_dir = config.get("paths", {}).get("rendered_clips_dir", "./data/rendered")
@@ -202,7 +205,19 @@ class VideoRenderer:
                 pass
 
         if not success or not os.path.exists(final_output_path):
-            logger.error(f"Failed to render short video: {stderr[-500:]}")
+            logger.warning(f"Primary FFmpeg rendering pipeline failed for clip {clip_id}: {stderr[-250:]}")
+            logger.info("🛠️ Invoking Autonomous AI Auto-Healer to rescue video render...")
+            healed_path = self.healer.heal_render_failure(
+                renderer=self,
+                source_video_path=source_video_path,
+                clip_info=clip_info,
+                words_list=words_list,
+                output_filename=output_filename,
+                stderr=stderr
+            )
+            if healed_path:
+                return healed_path
+            logger.error(f"Failed to render short video after auto-heal: {stderr[-500:]}")
             return None
 
         file_size_mb = os.path.getsize(final_output_path) / (1024 * 1024)

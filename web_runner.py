@@ -537,15 +537,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (data.thoughts && data.thoughts.length > 0) {
                     container.innerHTML = data.thoughts.map(t => {
                         const isStrat = t.thought_type === 'CONTENT_STRATEGY';
-                        const badgeColor = isStrat ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255, 0, 85, 0.15)';
-                        const badgeBorder = isStrat ? 'rgba(6, 182, 212, 0.4)' : 'rgba(255, 0, 85, 0.4)';
-                        const badgeText = isStrat ? '#38bdf8' : '#fb7185';
-                        const typeLabel = isStrat ? 'VIRAL CONTENT STRATEGY' : 'DIRECTOR REASONING';
+                        const isHeal = t.thought_type.startsWith('AUTO_HEAL');
+                        const badgeColor = isHeal ? 'rgba(16, 185, 129, 0.2)' : (isStrat ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255, 0, 85, 0.15)');
+                        const badgeBorder = isHeal ? 'rgba(16, 185, 129, 0.5)' : (isStrat ? 'rgba(6, 182, 212, 0.4)' : 'rgba(255, 0, 85, 0.4)');
+                        const badgeText = isHeal ? '#34d399' : (isStrat ? '#38bdf8' : '#fb7185');
+                        const icon = isHeal ? '🛠️ ' : (isStrat ? '💡 ' : '🎬 ');
+                        const typeLabel = isHeal ? 'AUTO-HEAL FIX' : (isStrat ? 'VIRAL STRATEGY' : 'DIRECTOR VISION');
                         
                         return `
-                            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; padding: 14px;">
+                            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid ${isHeal ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.06)'}; border-radius: 10px; padding: 14px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <div style="font-weight: 700; font-size: 13px; color: #f8fafc;">${escapeHtml(t.title || 'AI Reasoning')}</div>
+                                    <div style="font-weight: 700; font-size: 13px; color: #f8fafc;">${icon}${escapeHtml(t.title || 'AI Reasoning')}</div>
                                     <span style="font-size: 10px; padding: 2px 8px; border-radius: 12px; background: ${badgeColor}; border: 1px solid ${badgeBorder}; color: ${badgeText}; font-weight: 700; letter-spacing: 0.5px;">${typeLabel}</span>
                                 </div>
                                 <div style="font-size: 12px; color: #cbd5e1; line-height: 1.5; white-space: pre-wrap; font-family: 'JetBrains Mono', monospace;">${escapeHtml(t.reasoning_text || '')}</div>

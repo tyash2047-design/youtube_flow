@@ -4,6 +4,7 @@ import re
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from utils.logger import logger
+from ai.healer import AIAutoHealer
 
 load_dotenv()
 
@@ -12,6 +13,7 @@ class HighlightDetector:
         load_dotenv()
         self.config = config
         self.db = db
+        self.healer = AIAutoHealer(config, db)
         self.clip_cfg = config.get("clipping", {})
         self.min_clip_sec = self.clip_cfg.get("min_clip_seconds", 15)
         self.max_clip_sec = self.clip_cfg.get("max_clip_seconds", 50)
@@ -289,6 +291,37 @@ Return ONLY a raw JSON array matching this exact schema:
                 })
             except Exception as e:
                 logger.warning(f"Error parsing candidate clip: {e}")
+
+        # Autonomous Self-Correction: If 0 clips passed validation, trigger auto-healer
+        if not valid_clips and segments:
+            logger.warning("No candidate clips passed validation. Triggering Autonomous AI Self-Correction Healer...")
+            healed = self.healer.heal_clip_boundaries(
+                highlighter=self,
+                transcript_data=transcript_data,
+                video_metadata=video_metadata,
+                rejection_reason="Candidate clip durations were either outside bounds (15-50s) or lacked standalone context."
+            )
+            for c in healed:
+                try:
+                    start = float(c.get("start_time", 0))
+                    end = float(c.get("end_time", 0))
+                    duration = round(end - start, 2)
+                    if self.min_clip_sec <= duration <= self.max_clip_sec:
+                        valid_clips.append({
+                            "start_time": start,
+                            "end_time": end,
+                            "duration": duration,
+                            "hook": c.get("hook", ""),
+                            "working_title": c.get("working_title", "Self-Corrected Viral Short"),
+                            "viral_score": float(c.get("viral_score", 8.8)),
+                            "reason": c.get("reason", "Autonomous self-corrected standalone moment"),
+                            "dynamic_cuts": c.get("dynamic_cuts", True),
+                            "bgm_track": c.get("bgm_track", "gaming_upbeat"),
+                            "meme_sfx": c.get("meme_sfx"),
+                            "meme_offset": float(c.get("meme_offset_seconds", 0.0) or 0.0)
+                        })
+                except Exception:
+                    pass
 
         # Sort by viral score descending and cap at max_clips
         valid_clips.sort(key=lambda x: x["viral_score"], reverse=True)
